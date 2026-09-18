@@ -41,7 +41,7 @@ def get_input(
         "qmark": "",
         "amark": "",
         "style": style,
-        "instruction": instruction + (":" if instruction else ":"),
+        "instruction": instruction + (":" if instruction else ""),
         "mandatory": mandatory,
         "transformer": transformer,
     }
