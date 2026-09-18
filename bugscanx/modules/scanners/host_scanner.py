@@ -16,7 +16,7 @@ def read_cidrs_from_file(filepath):
                     valid_cidrs.append(line)
                 except ValueError:
                     pass
-
+            
         return valid_cidrs
     except Exception as e:
         print(f"[bold red]Error reading file: {e}[/bold red]")
@@ -62,17 +62,20 @@ def expand_hosts_file(filename):
     from bugscanx.modules.scrapers.subfinder.sources import get_sources
 
     base = filename.rsplit('.', 1)[0]
-    subs_file = f"{base}_subdomains.txt"
     expanded_file = f"{base}_expanded.txt"
 
+    # single output file: subfinder streams new subs into expanded_file,
+    # then the original hosts are merged in below (no separate _subdomains.txt)
     subfinder = SubFinder()
-    subs = subfinder.run(domains, subs_file, get_sources(), threads=DEFAULT_THREADS) or set()
+    subs = subfinder.run(domains, expanded_file, get_sources(), threads=DEFAULT_THREADS) or set()
 
     subs = {s for s in subs if not s.startswith('*.')}   # wildcard certs can't be scanned
+    new_hosts = set(subs) - set(hosts)
     merged = sorted(set(hosts) | set(subs))
     with open(expanded_file, 'w', encoding='utf-8') as f:
         f.write('\n'.join(merged) + '\n')
-    print(f"[bold green][+][/bold green] expanded list: "
+    print(f"[bold green][+][/bold green] one file: "
+          f"[bold]{len(hosts)}[/bold] original + [bold]{len(new_hosts)}[/bold] new = "
           f"[bold]{len(merged)}[/bold] hosts -> {expanded_file}")
     return expanded_file
 
@@ -93,27 +96,27 @@ def get_input_direct(no302=False):
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
         return None, None, None
-
+        
     port_list = get_input("Enter port(s)", validators="number", default="80").split(',')
     timeout = get_input("Enter timeout", validators="number", default="3", instruction="(seconds)")
     output, threads = get_common_inputs()
     method_list = get_input(
         "Select HTTP method(s)",
         input_type="choice",
-        multiselect=True,
+        multiselect=True, 
         choices=[
             "GET", "HEAD", "POST", "PUT",
             "DELETE", "OPTIONS", "TRACE", "PATCH"
         ],
         transformer=lambda result: ', '.join(result) if isinstance(result, list) else result
     )
-
+    
     if cidr:
         try:
             cidr_ranges = get_cidr_ranges_from_input(cidr)
         except AttributeError:
             cidr_ranges = cidr
-        from .scanners.direct import CIDRDirectScanner
+        from .scanners.direct import CIDRDirectScanner        
         scanner = CIDRDirectScanner(
             method_list=method_list,
             cidr_ranges=cidr_ranges,
@@ -132,7 +135,7 @@ def get_input_direct(no302=False):
             timeout=int(timeout),
             output_file=output
         )
-
+    
     return scanner, threads
 
 
@@ -140,7 +143,7 @@ def get_input_proxy():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
         return None, None, None
-
+        
     target_url = get_input("Enter target url", default="in1.wstunnel.site", validators="required")
     default_payload = (
         "GET / HTTP/1.1[crlf]"
@@ -151,7 +154,7 @@ def get_input_proxy():
     payload = get_input("Enter payload", default=default_payload, validators="required")
     port_list = get_input("Enter port(s)", validators="number", default="80").split(',')
     output, threads = get_common_inputs()
-
+    
     if cidr:
         try:
             cidr_ranges = get_cidr_ranges_from_input(cidr)
@@ -174,7 +177,7 @@ def get_input_proxy():
             payload=payload,
             output_file=output
         )
-
+    
     return scanner, threads
 
 
@@ -182,30 +185,30 @@ def get_input_proxy2():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
         return None, None, None
-
+        
     port_list = get_input("Enter port(s)", validators="number", default="80").split(',')
     output, threads = get_common_inputs()
     method_list = get_input(
         "Select HTTP method(s)",
         input_type="choice",
-        multiselect=True,
+        multiselect=True, 
         choices=[
             "GET", "HEAD", "POST", "PUT",
             "DELETE", "OPTIONS", "TRACE", "PATCH"
         ],
         transformer=lambda result: ', '.join(result) if isinstance(result, list) else result
     )
-
+    
     proxy = get_input("Enter proxy", instruction="(proxy:port)", validators="required")
-
+    
     use_auth = get_confirm(" Use proxy authentication?")
     proxy_username = None
     proxy_password = None
-
+    
     if use_auth:
         proxy_username = get_input("Enter proxy username", validators="required")
         proxy_password = get_input("Enter proxy password", validators="required")
-
+    
     if cidr:
         try:
             cidr_ranges = get_cidr_ranges_from_input(cidr)
@@ -234,9 +237,9 @@ def get_input_ssl():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
         return None, None, None
-
+        
     output, threads = get_common_inputs()
-
+    
     if cidr:
         try:
             cidr_ranges = get_cidr_ranges_from_input(cidr)
@@ -253,7 +256,7 @@ def get_input_ssl():
             input_file=filename,
             output_file=output
         )
-
+    
     return scanner, threads
 
 
@@ -261,10 +264,10 @@ def get_input_ping():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
         return None, None, None
-
+        
     port_list = get_input("Enter port(s)", validators="number", default="443").split(',')
     output, threads = get_common_inputs()
-
+    
     if cidr:
         try:
             cidr_ranges = get_cidr_ranges_from_input(cidr)
@@ -283,20 +286,20 @@ def get_input_ping():
             port_list=port_list,
             output_file=output
         )
-
+    
     return scanner, threads
 
 
 def get_user_input():
     mode = get_input(
         "Select scanning mode",
-        "choice",
+        "choice", 
         choices=[
             "Direct", "DirectNon302", "ProxyTest",
             "ProxyRoute", "Ping", "SSL"
         ]
     )
-
+    
     input_handlers = {
         'Direct': lambda: get_input_direct(no302=False),
         'DirectNon302': lambda: get_input_direct(no302=True),
@@ -305,7 +308,7 @@ def get_user_input():
         'Ping': get_input_ping,
         'SSL': get_input_ssl
     }
-
+    
     scanner, threads = input_handlers[mode]()
     return scanner, threads
 

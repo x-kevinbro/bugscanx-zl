@@ -86,6 +86,12 @@ When you select a hosts txt file in HOST SCANNER (any mode):
      connection per request.
    - Default host-scanner threads prompt raised 50 -> 100.
 
+5. **One output file for subdomain expansion**
+   - `<name>_subdomains.txt` is no longer created. SubFinder streams new
+     finds straight into `<name>_expanded.txt` and your original hosts are
+     merged in at the end (de-duplicated, wildcards removed) - one file,
+     nothing extra to clean up.
+
 ## Version
 
 1.3.0-zl2
