@@ -89,8 +89,17 @@ When you select a hosts txt file in HOST SCANNER (any mode):
 5. **One output file for subdomain expansion**
    - `<name>_subdomains.txt` is no longer created. SubFinder streams new
      finds straight into `<name>_expanded.txt` and your original hosts are
-     merged in at the end (de-duplicated, wildcards removed) - one file,
+     merged in at the end (de-duplicated) - one file,
      nothing extra to clean up.
+
+6. **Wildcard expansion**
+   - `*.example.com` cert finds (and literal `*.` lines already sitting in
+     your hosts file) are no longer dropped. For every wildcard base the
+     tool DNS-probes ~90 common prefixes (www, api, m, dev, vpn, cdn, ...)
+     and whatever resolves is added to the expanded list as a real,
+     scannable host.
+   - Bases that resolve even for a random name are flagged in the output
+     as DNS wildcards (every name answers there).
 
 ## Version
 

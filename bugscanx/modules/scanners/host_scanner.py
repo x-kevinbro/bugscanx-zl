@@ -43,12 +43,18 @@ def get_common_inputs():
 
 def expand_hosts_file(filename):
     """Find subdomains of every unique main domain in the file - each domain
-    is enumerated ONCE, no matter how many of its subdomains are in the file."""
+    is enumerated ONCE, no matter how many of its subdomains are in the file.
+    Wildcard cert finds (*.example.com) and literal wildcard lines are turned
+    into real hosts by DNS-probing common prefixes under each wildcard base."""
     from bugscanx.utils.domains import read_hosts_file, unique_main_domains
 
     hosts = read_hosts_file(filename)
     if not hosts:
         return filename
+
+    # literal '*.example.com' lines can't be scanned - bases expanded below
+    wildcards = {h[2:] for h in hosts if h.startswith('*.')}
+    hosts = [h for h in hosts if not h.startswith('*.')]
 
     domains, skipped = unique_main_domains(hosts)
     print(f"[bold cyan][*][/bold cyan] {len(hosts)} host(s) -> "
@@ -66,17 +72,32 @@ def expand_hosts_file(filename):
 
     # single output file: subfinder streams new subs into expanded_file,
     # then the original hosts are merged in below (no separate _subdomains.txt)
-    subfinder = SubFinder()
-    subs = subfinder.run(domains, expanded_file, get_sources(), threads=DEFAULT_THREADS) or set()
+    found = set()
+    if domains:
+        subfinder = SubFinder()
+        found = subfinder.run(domains, expanded_file, get_sources(),
+                              threads=DEFAULT_THREADS) or set()
 
-    subs = {s for s in subs if not s.startswith('*.')}   # wildcard certs can't be scanned
+    # wildcard certs (*.api.example.com) can't be scanned directly - probe
+    # common prefixes under each wildcard base and keep whatever resolves
+    wildcards |= {s[2:] for s in found if s.startswith('*.')}
+    subs = {s for s in found if not s.startswith('*.')}
+    wildcard_hosts = set()
+    if wildcards:
+        from bugscanx.modules.scrapers.subfinder.wildcard import expand_wildcards
+        print(f"[bold cyan][*][/bold cyan] {len(wildcards)} wildcard base(s) - "
+              f"DNS-probing common prefixes...")
+        wildcard_hosts = expand_wildcards(wildcards)
+        subs |= wildcard_hosts
+
     new_hosts = set(subs) - set(hosts)
     merged = sorted(set(hosts) | set(subs))
     with open(expanded_file, 'w', encoding='utf-8') as f:
         f.write('\n'.join(merged) + '\n')
     print(f"[bold green][+][/bold green] one file: "
-          f"[bold]{len(hosts)}[/bold] original + [bold]{len(new_hosts)}[/bold] new = "
-          f"[bold]{len(merged)}[/bold] hosts -> {expanded_file}")
+          f"[bold]{len(hosts)}[/bold] original + [bold]{len(new_hosts)}[/bold] new"
+          + (f" [dim]({len(wildcard_hosts)} from wildcards)[/dim]" if wildcard_hosts else "")
+          + f" = [bold]{len(merged)}[/bold] hosts -> {expanded_file}")
     return expanded_file
 
 
