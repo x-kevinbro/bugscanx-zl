@@ -1,0 +1,55 @@
+[project]
+name = "bugscan-x"
+dynamic = ["version"]
+description = "All-in-one tool for SNI discovery"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.7"
+
+authors = [
+    { name = "Ayan Rajpoot", email = "ayanrajpoot2004@gmail.com" }
+]
+
+keywords = [
+    "sni",
+    "scanning-tool",
+    "subdomain-enumeration",
+    "bughost",
+    "cidr-scanning",
+    "reverse-ip-lookup"
+]
+
+dependencies = [
+    "beautifulsoup4",
+    "dnspython",
+    "InquirerPy",
+    "packaging",
+    "pyfiglet",
+    "requests",
+    "rich",
+    "tqdm",
+]
+
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/FreeNetLabs/bugscanx"
+
+[project.scripts]
+bugscanx = "bugscanx.main:main"
+bugscan-x = "bugscanx.main:main"
+bx = "bugscanx.main:main"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages.find = {}
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
