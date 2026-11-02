@@ -1,89 +1,94 @@
 <div align="center">
     <img src="https://raw.githubusercontent.com/FreeNetLabs/bugscanx/refs/heads/main/assets/logo.png" width="128" height="128"/>
-    <h1>BugScanX</h1>
+    <h1>BugScanX-ZL</h1>
     <p><b>All-in-One Tool for Finding SNI Bug Hosts</b></p>
+    <p><sub>Community continuation ("ZL") of <a href="https://github.com/FreeNetLabs/bugscanx">BugScanX</a> by Ayan Rajpoot</sub></p>
 </div>
 
 <p align="center">
-    <img src="https://img.shields.io/github/stars/FreeNetLabs/bugscanx?color=e57474&labelColor=1e2528&style=for-the-badge"/>
-    <img src="https://img.shields.io/pypi/dm/bugscan-x?color=67b0e8&labelColor=1e2528&style=for-the-badge"/>
-    <img src="https://img.shields.io/pypi/v/bugscan-x?color=8ccf7e&labelColor=1e2528&style=for-the-badge"/>
-    <img src="https://img.shields.io/github/license/FreeNetLabs/bugscanx?color=f39c12&labelColor=1e2528&style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/version-1.4.0-8ccf7e?labelColor=1e2528&style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/python-3.9%2B-67b0e8?labelColor=1e2528&style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/license-MIT-f39c12?labelColor=1e2528&style=for-the-badge"/>
 </p>
 
 ## 🎯 Overview
 
-**BugScanX** is a specialized bug host discovery tool designed for finding working SNI/HTTP hosts suitable for tunneling applications. It enables users to discover bug hosts that can be used to create configurations for various tunneling and VPN applications, providing unrestricted internet access.
+**BugScanX-ZL** is a bug host discovery tool for finding working SNI/HTTP hosts suitable for tunneling applications. It continues the original BugScanX with scanner fixes, much better subdomain coverage and faster response checks. See [PATCH-NOTES.md](PATCH-NOTES.md) for every change.
 
 ## ✨ Features
 
 ### 🎯 Host Scanner
 
-Advanced multi-mode bug host scanning with specialized capabilities:
+- **Direct / DirectNon302**: HTTP/HTTPS checks with any HTTP method. Choose **Auto / HTTP / HTTPS** (Auto uses HTTPS on 443, 8443, 2053, 2083, 2087, 2096, 9443). Only response headers are read, so big or slow pages don't slow the scan.
+- **SSL/SNI**: TLS handshake check, with an optional "trusted certificates only" mode.
+- **ProxyTest**: Custom payloads (e.g. websocket upgrade); `101` responses are detected even when the connection stays open.
+- **ProxyRoute**: Requests through your own HTTP proxy, with optional authentication.
+- **Ping**: TCP connectivity check (IPv4 and IPv6).
+- **Auto subdomain expansion**: Pick a hosts file and it finds subdomains of each main domain first (each domain once, public-suffix aware), then scans the merged list.
+- End-of-scan summary of failed checks (timeouts, refused, DNS, TLS…), so a broken connection never looks like "no results".
 
-- **Direct Scanning**: HTTP/HTTPS bug host discovery with custom methods
-- **DirectNon302**: Specialized scanning that excludes redirect responses (essential for bug hosts)
-- **SSL/SNI Analysis**: TLS/SSL configuration analysis for SNI bug hosts
-- **Proxy Testing**: Comprehensive proxy validation for tunneling compatibility
-- **Ping Scanning**: Connectivity testing for discovered hosts
-- Support for all HTTP methods and custom payload injection
-- Multi-threaded concurrent processing
+### 🔍 Subdomain Finder
 
-### 🔍 Subdomain Enumeration
+- **Sources**: crt.sh, CertSpotter, RapidDNS, HackerTarget, AlienVault, urlscan and the Wayback Machine.
+- **Thorough mode**: waits for slow sources such as crt.sh and retries when they're busy, so it finds the most subdomains.
+- **Fast mode**: short timeouts and skips Wayback. Much quicker for big lists, but can miss names.
+- **Optional DNS check** of ~90 common names (www, api, mail…) to find hosts missing from public records, ignoring DNS-wildcard domains.
+- Never overwrites an existing file without asking (Append / Overwrite / Cancel).
 
-Professional subdomain discovery for expanding bug host lists:
+> No tool can find every subdomain. Passive sources only know names that appear in public records (certificates, archives, past scans).
 
-- **Passive Discovery**: Leverages multiple API providers and search engines
-- **Batch Processing**: Mass domain enumeration from target lists
+### 🌐 IP Lookup, 🚪 Port Scanner, 🔎 DNS & Host Info, 📁 File Toolkit
 
-### 🌐 IP Lookup & Reverse DNS
+Reverse-IP lookup and CIDR processing, a port scanner (common ports or all 1–65535), DNS records, host/CDN/TLS details, and file split/merge/dedupe tools.
 
-Comprehensive IP intelligence for bug host clustering:
+## ⚡ Installation
 
-- **Reverse IP Lookup**: Discover all domains hosted on target IPs
-- **CIDR Range Processing**: Bulk analysis of IP ranges
-- **Multi-Source Aggregation**: Combines data from multiple sources
-
-### 🚪 Port Scanner
-
-Advanced port scanning for service discovery with common tunneling ports (80, 443, 8080, 8443).
-
-### 🔎 DNS & SSL Analysis
-
-Comprehensive analysis for SNI bug hosts including DNS records and SSL certificate validation.
-
-### 📁 File Management & Processing
-
-Professional-grade file processing with smart splitting, merging, deduplication, and filtering tools.
-
-## ⚡ Quick Start
-
-### 🚀 Installation
+Requires **Python 3.9+** (works on Termux).
 
 ```bash
-# Install from PyPI
-pip install bugscan-x
+# 1. Remove the original package if you have it - both provide the
+#    same "bugscanx" module and would conflict
+pip uninstall -y bugscan-x
+
+# 2. Install BugScanX-ZL from GitHub
+pip install git+https://github.com/x-kevinbro/bugscanx-zl.git@main
 ```
 
-### 🎮 Launch BugScanX
+> ⚠️ Do **not** run `pip install bugscan-x` - that installs the original BugScanX from PyPI and replaces ZL.
+
+From a local clone (for development):
 
 ```bash
-# Primary command
-bugscanx
-
-# Alternative commands
-bugscan-x
-bx
+git clone https://github.com/x-kevinbro/bugscanx-zl.git
+cd bugscanx-zl
+pip install -e ".[test]"
+pytest
 ```
+
+## 🎮 Usage
+
+```bash
+bugscanx      # or: bugscan-x, bx
+```
+
+**Updating**: use menu **9 UPDATE**. It updates from this repository only (`git pull` in a clone, otherwise `pip install git+…`). While the repository is private, set `GITHUB_TOKEN` so the version check can read it.
+
+## ⚙️ Environment variables
+
+| Variable | Effect |
+|---|---|
+| `BUGSCANX_DEBUG=1` | Write full error details to `bugscanx-debug.log` |
+| `BUGSCANX_INSECURE_SOURCES=1` | Don't verify TLS certificates of subdomain data sources (only behind a proxy you trust) |
+| `GITHUB_TOKEN` | Lets the updater read a private repository |
+| `BUGSCANX_ZL_REPO` / `BUGSCANX_ZL_BRANCH` | Update from a different repository or branch |
 
 ---
 
 <div align="center">
-    <h3>Built with ❤️ for the Free Internet Community</h3>
     <p>
-        <a href="https://github.com/Ayanrajpoot10">👨‍💻 Developer</a> •
-        <a href="https://t.me/BugScanX">💬 Telegram</a> •
-        <a href="https://pypi.org/project/bugscan-x/">📦 PyPI</a>
+        Original project: <a href="https://github.com/FreeNetLabs/bugscanx">FreeNetLabs/bugscanx</a> •
+        <a href="https://github.com/Ayanrajpoot10">👨‍💻 Original developer</a> •
+        <a href="https://t.me/BugScanX">💬 Telegram</a>
     </p>
-    <p><sub>⚠️ This tool is intended for educational and authorized testing purposes only. Use responsibly and legally.</sub></p>
+    <p><sub>⚠️ This tool is intended for educational and authorized testing purposes only. Only scan hosts you own or have permission to test. Use responsibly and legally.</sub></p>
 </div>

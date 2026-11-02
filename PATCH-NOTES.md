@@ -2,6 +2,81 @@
 
 Community continuation of the discontinued bugscanx host checker.
 
+## 1.4.0 - accuracy, coverage and speed
+
+Package renamed to **`bugscanx-zl`** (was `bugscan-x`) so updates can no
+longer replace ZL with the original PyPI release. Requires **Python 3.9+**.
+Uninstall the old package first: `pip uninstall bugscan-x`.
+
+### Subdomain finder (menu 2 and the host-scanner expansion step)
+
+1. **crt.sh actually returns results now**
+   - crt.sh, usually the biggest source, needs 20-60 s for mid-size domains.
+     The ZL2 3 s/6 s timeout made it silently return nothing for exactly the
+     domains with the most subdomains. The "~1000 domains/min" figure in
+     ZL2 was reached largely because of that.
+   - It now gets a 90 s timeout, two retries when busy (502/503) and a
+     lighter unexpired-certificates fallback.
+   - Live test: tesla.com went from 139 to 651 subdomains, hackerone.com
+     from 22 to 30.
+2. **Sources**: added Wayback Machine and urlscan; CertSpotter reads up to
+   10 pages; AnubisDB removed (jldc.me now returns 403). HackerTarget's
+   "API count exceeded" text is no longer treated as a result.
+3. **Thorough / Fast modes**: Thorough waits for slow sources (most
+   subdomains); Fast uses short timeouts and skips Wayback (much quicker,
+   can miss names).
+4. **Optional DNS check** of ~90 common names (menu 2), ignoring domains
+   that answer for any name.
+5. Results are lowercased and cleaned (trailing dots, e-mail addresses and
+   other junk removed). Failed or rate-limited sources are listed at the end.
+6. Domain grouping uses the Public Suffix List (`tldextract`, offline), so
+   e.g. `a.example.com.lk` -> `example.com.lk`; bare suffixes such as
+   `co.uk` or `github.io` are never enumerated. The domain list is shown
+   before enumeration starts.
+
+### Host scanner
+
+1. **Response checks ~45x faster**: Direct and ProxyRoute read only the
+   status line and headers instead of downloading every page body. Each
+   host is resolved once instead of once per port and method. Local
+   benchmark: 120 hosts 49.7 s -> 1.1 s; 4,000 checks in 4.5 s with
+   identical results.
+2. **HTTP / HTTPS choice**: Auto (HTTPS on 443, 8443, 2053, 2083, 2087,
+   2096, 9443), HTTP or HTTPS. Previously only port 443 used HTTPS.
+3. **ProxyTest kept losing 101 results**: it read until the server closed
+   the socket; websocket upgrades stay open, so the read timed out and the
+   hit was dropped. It now stops at the end of the headers.
+4. **Accurate progress totals**: blank/comment/wildcard lines are skipped,
+   a missing final newline no longer drops the last host, CIDR /31, /32 and
+   IPv6 ranges are counted correctly.
+5. **Failures are visible**: timeouts, refused connections, DNS, TLS and
+   proxy errors are summarised at the end; internal errors are reported.
+   `BUGSCANX_DEBUG=1` writes details to `bugscanx-debug.log`.
+6. SSL mode states that certificates aren't verified and offers a
+   trusted-certificates-only option; Ping and SSL work over IPv6.
+7. Fixed a crash when no input file or CIDR range was given; port lists
+   such as `80, 443` are trimmed.
+
+### Other
+
+- **Port scanner** now includes port 65535; Ctrl+C stops immediately.
+- **No silent overwrites**: existing output files prompt Append /
+  Overwrite / Cancel; output can't be the same file as the input.
+- **Updater** pulls only from this repository (`git pull` in a clone,
+  otherwise `pip install git+...`). `GITHUB_TOKEN` is needed while the repo
+  is private.
+- Subdomain data sources are now checked with TLS certificate verification
+  (`BUGSCANX_INSECURE_SOURCES=1` to disable).
+- 70 automated tests, run by GitHub Actions on Python 3.9-3.13.
+
+## Version
+
+1.4.0
+
+---
+
+## Earlier ZL releases
+
 ## What was fixed
 
 1. **Scanner freeze ("stuck when scanning")**
