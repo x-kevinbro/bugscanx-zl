@@ -16,9 +16,9 @@ jobs:
       # uv can still install EOL interpreters such as 3.8, which
       # actions/setup-python no longer provides on ubuntu-latest
       - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: ${{ matrix.python-version }}
       - name: Install
-        run: uv pip install -e ".[test]"
+        run: |
+          uv venv --python ${{ matrix.python-version }} .venv
+          uv pip install --python .venv/bin/python -e ".[test]"
       - name: Test
-        run: python -m pytest -q
+        run: .venv/bin/python -m pytest -q
