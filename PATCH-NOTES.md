@@ -30,7 +30,9 @@ Requests" and the rest of the list came back empty - silently.
   `coinbase.com: 0 subdomains (no answer: Crt.sh busy, Hackertarget daily limit reached)`.
 - **Live results**: subdomains are saved and counted the moment any source
   answers (the hits counter moves immediately; Ctrl+C keeps everything).
-- **Optional API keys**: `OTX_API_KEY`, `CERTSPOTTER_API_KEY`, `URLSCAN_API_KEY`.
+- **Optional API keys**: `OTX_API_KEY`, `CERTSPOTTER_API_KEY`, `URLSCAN_API_KEY`,
+  `C99_API_KEY` (adds C99.nl via its official API; the free web form is
+  protected against automation, so it is not scraped).
   AlienVault is only used when `OTX_API_KEY` is set.
 - Warning when a list has more than 1,000 domains (free sources make that
   take many hours).

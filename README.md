@@ -107,6 +107,7 @@ bugscanx      # or: bugscan-x, bx
 | `OTX_API_KEY` | Enables the AlienVault OTX subdomain source (free key at otx.alienvault.com - it refuses anonymous queries) |
 | `CERTSPOTTER_API_KEY` | Higher CertSpotter quota (anonymous: about 10 searches, then a cooldown) |
 | `URLSCAN_API_KEY` | Higher urlscan.io quota (anonymous: 30 searches / minute) |
+| `C99_API_KEY` | Adds the C99.nl subdomain finder (paid API key from api.c99.nl - the free web form blocks automated use) |
 
 ---
 
