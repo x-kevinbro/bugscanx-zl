@@ -45,6 +45,7 @@ class Proxy2ScannerBase(DirectScannerBase):
     def request(self, method, url, **kwargs):
         method = method.upper()
         kwargs['timeout'] = self.timeout
+        kwargs.setdefault('stream', True)  # headers only, see DirectScannerBase
         max_attempts = self.DEFAULT_RETRY
 
         for attempt in range(max_attempts):

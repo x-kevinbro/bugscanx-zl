@@ -2,6 +2,7 @@ import os
 import re
 import random
 import threading
+import time
 import requests
 from requests.adapters import HTTPAdapter
 from bugscanx.utils.http import HEADERS, USER_AGENTS
@@ -63,27 +64,42 @@ class RequestHandler:
         if getattr(self._tls, 'last_error', None) is None:
             self._tls.last_error = reason
 
-    def get(self, url, timeout=None):
-        try:
-            response = self._session().get(
-                url,
-                timeout=timeout or self.DEFAULT_TIMEOUT,
-                headers=self._get_headers(),
-            )
-            if response.status_code == 200:
-                return response
-            if response.status_code == 429:
-                self._set_error('rate limited')
-            else:
-                self._set_error(f'http {response.status_code}')
-        except requests.exceptions.SSLError:
-            self._set_error('tls error')
-        except requests.exceptions.Timeout:
-            self._set_error('timeout')
-        except requests.exceptions.ConnectionError:
-            self._set_error('connection error')
-        except requests.RequestException:
-            self._set_error('request error')
+    RETRY_STATUS = (429, 500, 502, 503, 504)
+
+    def get(self, url, timeout=None, retries=0, backoff=2.0, headers=None):
+        """GET with a hard timeout. Retries (if any) only on timeouts,
+        connection errors and 429/5xx - the typical "busy" answers of free
+        sources such as crt.sh. The last failure reason is kept for
+        last_error()."""
+        req_headers = self._get_headers()
+        if headers:
+            req_headers.update(headers)
+        for attempt in range(retries + 1):
+            reason = None
+            try:
+                response = self._session().get(
+                    url,
+                    timeout=timeout or self.DEFAULT_TIMEOUT,
+                    headers=req_headers,
+                )
+                if response.status_code == 200:
+                    self._tls.last_error = None
+                    return response
+                reason = ('rate limited' if response.status_code == 429
+                          else f'http {response.status_code}')
+                retryable = response.status_code in self.RETRY_STATUS
+            except requests.exceptions.SSLError:
+                reason, retryable = 'tls error', False
+            except requests.exceptions.Timeout:
+                reason, retryable = 'timeout', True
+            except requests.exceptions.ConnectionError:
+                reason, retryable = 'connection error', True
+            except requests.RequestException:
+                reason, retryable = 'request error', False
+            self._tls.last_error = reason
+            if not retryable or attempt == retries:
+                break
+            time.sleep(backoff * (attempt + 1))
         return None
 
     def __enter__(self):
@@ -97,6 +113,7 @@ class RequestHandler:
 
 
 class DomainValidator:
+    HOST_CHARS = re.compile(r'^[a-z0-9_](?:[a-z0-9_.-]*[a-z0-9])?$')
     DOMAIN_REGEX = re.compile(
         r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+'
         r'[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]$'
@@ -111,17 +128,33 @@ class DomainValidator:
         )
 
     @staticmethod
+    def normalize(name):
+        """'  WWW.Example.COM. ' -> 'www.example.com'. Keeps a leading '*.'
+        (wildcard certs are expanded later). Returns None for junk such as
+        e-mail addresses, URLs or names with spaces that some sources mix
+        into their results."""
+        if not isinstance(name, str):
+            return None
+        name = name.strip().strip('.').lower()
+        wildcard = name.startswith('*.')
+        core = name[2:] if wildcard else name
+        if not core or not DomainValidator.HOST_CHARS.match(core):
+            return None
+        return name
+
+    @staticmethod
     def filter_valid_subdomains(subdomains, domain):
         if not domain or not isinstance(domain, str):
             return set()
 
+        domain = domain.strip().strip('.').lower()
         domain_suffix = f".{domain}"
         result = set()
 
         for sub in subdomains:
-            if not isinstance(sub, str):
+            sub = DomainValidator.normalize(sub)
+            if not sub:
                 continue
-
             if sub == domain or sub.endswith(domain_suffix):
                 result.add(sub)
 

@@ -3,7 +3,7 @@ import threading
 
 from bugscanx.modules.scanners.scanners.multithread import MultiThread
 from bugscanx.utils.files import check_output_path, resolve_output_mode
-from bugscanx.utils.prompts import get_input
+from bugscanx.utils.prompts import get_confirm, get_input
 from .logger import SubFinderConsole
 from .sources import get_sources
 from .utils import DomainValidator
@@ -143,19 +143,30 @@ class SubFinder:
         return set(engine._all)
 
 
+def ask_source_mode():
+    choice = get_input(
+        "Select search mode",
+        input_type="choice",
+        choices=[
+            "Thorough - all sources, waits for slow ones (most subdomains)",
+            "Fast - short timeouts, skips Wayback (quicker, can miss some)",
+        ],
+    )
+    return "fast" if choice.startswith("Fast") else "thorough"
+
+
 def main():
     domains = []
     file_path = None
-    sources = get_sources()
     input_type = get_input("Select input mode", input_type="choice", choices=["Manual", "File"])
     if input_type == "Manual":
         domain_input = get_input("Enter domain(s)", validators="required")
-        domains = [d.strip() for d in domain_input.split(',') if DomainValidator.is_valid_domain(d.strip())]
+        domains = [d.strip().lower() for d in domain_input.split(',') if DomainValidator.is_valid_domain(d.strip())]
         default_output = f"{domains[0]}_subdomains.txt" if domains else "subdomains.txt"
     else:
         file_path = get_input("Enter filename", input_type="file", validators="file")
         with open(file_path, 'r') as f:
-            domains = [d.strip() for d in f if DomainValidator.is_valid_domain(d.strip())]
+            domains = [d.strip().lower() for d in f if DomainValidator.is_valid_domain(d.strip())]
         default_output = f"{file_path.rsplit('.', 1)[0]}_subdomains.txt"
 
     while True:
@@ -169,8 +180,19 @@ def main():
             print(" Cancelled - nothing was written.")
             return
         break
+    sources = get_sources(ask_source_mode())
+    brute = get_confirm(
+        " Also DNS-check common names (www, api, mail, ...) to find hosts "
+        "missing from public records?", default=False)
     threads = get_input("Enter threads", validators="number", default=str(DEFAULT_THREADS))
     print()
     subfinder = SubFinder()
-    subfinder.run(domains, output_file, sources,
-                  threads=int(threads or DEFAULT_THREADS), mode=mode)
+    found = subfinder.run(domains, output_file, sources,
+                          threads=int(threads or DEFAULT_THREADS), mode=mode) or set()
+    if brute and domains:
+        from .wildcard import expand_wildcards
+        extra = expand_wildcards(domains, drop_dns_wildcards=True) - found
+        if extra:
+            with open(output_file, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(sorted(extra)) + '\n')
+        print(f" DNS check added {len(extra)} new host(s) -> {output_file}")

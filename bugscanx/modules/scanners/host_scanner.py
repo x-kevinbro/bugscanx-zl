@@ -99,7 +99,8 @@ def expand_hosts_file(filename):
     if not get_confirm("  Find subdomains of these domains first (only scan targets you are authorised to test)?", default=True):
         return filename
 
-    from bugscanx.modules.scrapers.subfinder.subfinder import SubFinder, DEFAULT_THREADS
+    from bugscanx.modules.scrapers.subfinder.subfinder import (
+        SubFinder, DEFAULT_THREADS, ask_source_mode)
     from bugscanx.modules.scrapers.subfinder.sources import get_sources
 
     base = filename.rsplit('.', 1)[0]
@@ -118,7 +119,7 @@ def expand_hosts_file(filename):
     found = set()
     if domains:
         subfinder = SubFinder()
-        found = subfinder.run(domains, expanded_file, get_sources(),
+        found = subfinder.run(domains, expanded_file, get_sources(ask_source_mode()),
                               threads=DEFAULT_THREADS, mode=mode) or set()
 
     # wildcard certs (*.api.example.com) can't be scanned directly - probe

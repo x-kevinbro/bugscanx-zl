@@ -88,12 +88,21 @@ class WildcardExpander(MultiThread):
             self.logger.log(self.logger.colorize(
                 f"  note: {base} answers for ANY name (DNS wildcard)", 'YELLOW'))
 
-def expand_wildcards(wildcards, prefixes=COMMON_PREFIXES, threads=DEFAULT_THREADS):
+def expand_wildcards(wildcards, prefixes=COMMON_PREFIXES, threads=DEFAULT_THREADS,
+                     drop_dns_wildcards=False):
     """Expand '*.example.com'-style wildcards into real, resolvable hosts.
-    Accepts names with or without the leading '*.'; returns a set."""
+    Accepts names with or without the leading '*.'; returns a set.
+
+    drop_dns_wildcards=True discards every hit under a base that answers for
+    ANY name - used for brute-forcing real domains, where such "hits" are
+    meaningless (every prefix would resolve)."""
     bases = sorted({w[2:] if w.startswith('*.') else w for w in wildcards if w})
     if not bases:
         return set()
     engine = WildcardExpander(bases, prefixes=prefixes, threads=threads)
     engine.start()
-    return set(engine.get_success())
+    found = set(engine.get_success())
+    if drop_dns_wildcards and engine._dns_wildcards:
+        found = {h for h in found
+                 if not any(h.endswith('.' + b) for b in engine._dns_wildcards)}
+    return found
