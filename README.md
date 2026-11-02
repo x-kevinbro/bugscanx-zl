@@ -6,7 +6,7 @@
 </div>
 
 <p align="center">
-    <img src="https://img.shields.io/badge/version-1.5.0-8ccf7e?labelColor=1e2528&style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/version-1.5.1-8ccf7e?labelColor=1e2528&style=for-the-badge"/>
     <img src="https://img.shields.io/badge/python-3.9%2B-67b0e8?labelColor=1e2528&style=for-the-badge"/>
     <img src="https://img.shields.io/badge/license-MIT-f39c12?labelColor=1e2528&style=for-the-badge"/>
 </p>
@@ -104,6 +104,9 @@ bugscanx      # or: bugscan-x, bx
 | `BUGSCANX_INSECURE_SOURCES=1` | Don't verify TLS certificates of subdomain data sources (only behind a proxy you trust) |
 | `GITHUB_TOKEN` | Lets the updater read a private repository |
 | `BUGSCANX_ZL_REPO` / `BUGSCANX_ZL_BRANCH` | Update from a different repository or branch |
+| `OTX_API_KEY` | Enables the AlienVault OTX subdomain source (free key at otx.alienvault.com - it refuses anonymous queries) |
+| `CERTSPOTTER_API_KEY` | Higher CertSpotter quota (anonymous: about 10 searches, then a cooldown) |
+| `URLSCAN_API_KEY` | Higher urlscan.io quota (anonymous: 30 searches / minute) |
 
 ---
 

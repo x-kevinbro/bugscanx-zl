@@ -2,6 +2,39 @@
 
 Community continuation of the discontinued bugscanx host checker.
 
+## 1.5.1 - subdomain finder: no more "only the first domains get results"
+
+Free sources (crt.sh, CertSpotter, urlscan, RapidDNS, Wayback ...) block an
+IP that sends dozens of parallel queries. The finder fired all of them at
+once, so after the first 10-30 domains every source answered "429 Too Many
+Requests" and the rest of the list came back empty - silently.
+
+- **Per-source pacing**: each source has its own limit on parallel requests
+  and a minimum gap between requests (urlscan: 30/min, etc.).
+- **429 = cooldown, not retry-in-place**: `Retry-After` is honoured; the
+  source pauses and the lookup is **retried later** instead of being lost.
+- **Retry rounds**: lookups refused with "rate limited" or "busy" are re-run
+  after the main pass, once the sources have cooled down (Thorough: 2 rounds of up
+  to 3 min each, Fast: 1 round of 45 s).
+- **Busy-source breaker**: after 4 timeouts / 5xx in a row a source (usually
+  crt.sh) pauses and its remaining lookups move to the retry round instead of
+  each wasting minutes now. crt.sh timeout 90 s -> 60 s (it gives up at 60 s
+  on its side anyway).
+- **Dead sources are skipped**: HackerTarget "API count exceeded" (daily free
+  quota), AlienVault "anonymous access is limited" and a quota that keeps
+  answering with a long Retry-After (CertSpotter) disable that source for the
+  run, with one message instead of hundreds of failed requests.
+- Responses have a total time cap (a trickling response can no longer hold a
+  worker for many minutes).
+- **Every domain is reported**, including 0-result ones, with the reason:
+  `coinbase.com: 0 subdomains (no answer: Crt.sh busy, Hackertarget daily limit reached)`.
+- **Live results**: subdomains are saved and counted the moment any source
+  answers (the hits counter moves immediately; Ctrl+C keeps everything).
+- **Optional API keys**: `OTX_API_KEY`, `CERTSPOTTER_API_KEY`, `URLSCAN_API_KEY`.
+  AlienVault is only used when `OTX_API_KEY` is set.
+- Warning when a list has more than 1,000 domains (free sources make that
+  take many hours).
+
 ## 1.5.0 - ZL Scanner suite (menu 10)
 
 New main-menu entry **[10] ZL SCANNER** with nine scanners:
