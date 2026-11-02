@@ -8,7 +8,7 @@ from bugscanx.utils.domains import main_domain, normalize_host, unique_main_doma
     ("instagram.com", "instagram.com"),
     ("a.b.example.co.uk", "example.co.uk"),
     ("www.example.com.au", "example.com.au"),
-    ("x.y.example.co.lk", "example.co.lk"),
+    ("x.y.example.com.lk", "example.com.lk"),
     ("1.2.3.4", "1.2.3.4"),
     ("localhost", "localhost"),
 ])
