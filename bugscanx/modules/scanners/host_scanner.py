@@ -1,6 +1,9 @@
 import ipaddress
 from rich import print
+from bugscanx.utils.files import check_output_path, resolve_output_mode
 from bugscanx.utils.prompts import get_input, get_confirm
+
+SCOPE_PREVIEW = 15
 
 
 def read_cidrs_from_file(filepath):
@@ -27,12 +30,35 @@ def get_cidr_ranges_from_input(cidr_input):
     return [c.strip() for c in cidr_input.split(',')]
 
 
-def get_common_inputs():
-    default_filename = "results.txt"
-    output = get_input(
-        "Enter output filename",
-        default=default_filename
+def parse_ports(text):
+    """'80, 443,,8080' -> ['80', '443', '8080'] (spaces / empty items dropped)."""
+    return [p.strip() for p in str(text).split(',') if p.strip()]
+
+
+def get_scheme():
+    choice = get_input(
+        "Select protocol",
+        input_type="choice",
+        choices=[
+            "Auto (HTTPS on 443/8443/2053/2083/2087/2096/9443, HTTP elsewhere)",
+            "HTTP",
+            "HTTPS",
+        ],
     )
+    return 'auto' if choice.startswith('Auto') else choice.lower()
+
+
+def get_common_inputs(input_file=None):
+    default_filename = "results.txt"
+    while True:
+        output = get_input(
+            "Enter output filename",
+            default=default_filename
+        )
+        error = check_output_path(output, input_files=[input_file])
+        if not error:
+            break
+        print(f"[bold red] {error}[/bold red]")
     threads = get_input(
         "Enter threads",
         validators="number",
@@ -59,9 +85,18 @@ def expand_hosts_file(filename):
     domains, skipped = unique_main_domains(hosts)
     print(f"[bold cyan][*][/bold cyan] {len(hosts)} host(s) -> "
           f"[bold]{len(domains)}[/bold] unique main domain(s)"
-          + (f" [dim](skipped {skipped} already-covered line(s))[/dim]" if skipped else ""))
+          + (f" [dim](skipped {skipped} already-covered / public-suffix line(s))[/dim]" if skipped else ""))
 
-    if not get_confirm("  Find subdomains of each main domain first?", default=True):
+    # Show exactly which domains would be enumerated so the user can confirm
+    # they are all inside the scope they are authorised to test.
+    if domains:
+        print("[bold cyan][*][/bold cyan] Domains that will be enumerated:")
+        for d in domains[:SCOPE_PREVIEW]:
+            print(f"      {d}")
+        if len(domains) > SCOPE_PREVIEW:
+            print(f"      [dim]... and {len(domains) - SCOPE_PREVIEW} more[/dim]")
+
+    if not get_confirm("  Find subdomains of these domains first (only scan targets you are authorised to test)?", default=True):
         return filename
 
     from bugscanx.modules.scrapers.subfinder.subfinder import SubFinder, DEFAULT_THREADS
@@ -69,6 +104,14 @@ def expand_hosts_file(filename):
 
     base = filename.rsplit('.', 1)[0]
     expanded_file = f"{base}_expanded.txt"
+    mode = resolve_output_mode(expanded_file, input_files=[filename])
+    if mode is None:
+        print("[yellow] Subdomain expansion skipped - scanning the original file.[/yellow]")
+        return filename
+    previous = set()
+    if mode == 'a':
+        from bugscanx.utils.domains import read_hosts_file as _read
+        previous = set(_read(expanded_file))
 
     # single output file: subfinder streams new subs into expanded_file,
     # then the original hosts are merged in below (no separate _subdomains.txt)
@@ -76,7 +119,7 @@ def expand_hosts_file(filename):
     if domains:
         subfinder = SubFinder()
         found = subfinder.run(domains, expanded_file, get_sources(),
-                              threads=DEFAULT_THREADS) or set()
+                              threads=DEFAULT_THREADS, mode=mode) or set()
 
     # wildcard certs (*.api.example.com) can't be scanned directly - probe
     # common prefixes under each wildcard base and keep whatever resolves
@@ -91,7 +134,7 @@ def expand_hosts_file(filename):
         subs |= wildcard_hosts
 
     new_hosts = set(subs) - set(hosts)
-    merged = sorted(set(hosts) | set(subs))
+    merged = sorted(set(hosts) | set(subs) | previous)
     with open(expanded_file, 'w', encoding='utf-8') as f:
         f.write('\n'.join(merged) + '\n')
     print(f"[bold green][+][/bold green] one file: "
@@ -116,11 +159,12 @@ def get_host_input():
 def get_input_direct(no302=False):
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
-        return None, None, None
+        return None, None
         
-    port_list = get_input("Enter port(s)", validators="number", default="80").split(',')
+    port_list = parse_ports(get_input("Enter port(s)", validators="number", default="80"))
+    scheme = get_scheme()
     timeout = get_input("Enter timeout", validators="number", default="3", instruction="(seconds)")
-    output, threads = get_common_inputs()
+    output, threads = get_common_inputs(filename)
     method_list = get_input(
         "Select HTTP method(s)",
         input_type="choice",
@@ -144,7 +188,8 @@ def get_input_direct(no302=False):
             port_list=port_list,
             no302=no302,
             timeout=int(timeout),
-            output_file=output
+            output_file=output,
+            scheme=scheme
         )
     else:
         from .scanners.direct import HostDirectScanner
@@ -154,7 +199,8 @@ def get_input_direct(no302=False):
             port_list=port_list,
             no302=no302,
             timeout=int(timeout),
-            output_file=output
+            output_file=output,
+            scheme=scheme
         )
     
     return scanner, threads
@@ -163,7 +209,7 @@ def get_input_direct(no302=False):
 def get_input_proxy():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
-        return None, None, None
+        return None, None
         
     target_url = get_input("Enter target url", default="in1.wstunnel.site", validators="required")
     default_payload = (
@@ -173,8 +219,8 @@ def get_input_proxy():
         "Upgrade: websocket[crlf][crlf]"
     )
     payload = get_input("Enter payload", default=default_payload, validators="required")
-    port_list = get_input("Enter port(s)", validators="number", default="80").split(',')
-    output, threads = get_common_inputs()
+    port_list = parse_ports(get_input("Enter port(s)", validators="number", default="80"))
+    output, threads = get_common_inputs(filename)
     
     if cidr:
         try:
@@ -205,10 +251,10 @@ def get_input_proxy():
 def get_input_proxy2():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
-        return None, None, None
+        return None, None
         
-    port_list = get_input("Enter port(s)", validators="number", default="80").split(',')
-    output, threads = get_common_inputs()
+    port_list = parse_ports(get_input("Enter port(s)", validators="number", default="80"))
+    output, threads = get_common_inputs(filename)
     method_list = get_input(
         "Select HTTP method(s)",
         input_type="choice",
@@ -220,6 +266,7 @@ def get_input_proxy2():
         transformer=lambda result: ', '.join(result) if isinstance(result, list) else result
     )
     
+    scheme = get_scheme()
     proxy = get_input("Enter proxy", instruction="(proxy:port)", validators="required")
     
     use_auth = get_confirm(" Use proxy authentication?")
@@ -240,7 +287,8 @@ def get_input_proxy2():
             method_list=method_list,
             cidr_ranges=cidr_ranges,
             port_list=port_list,
-            output_file=output
+            output_file=output,
+            scheme=scheme
         ).set_proxy(proxy, proxy_username, proxy_password)
     else:
         from .scanners.proxy_request import HostProxy2Scanner
@@ -248,7 +296,8 @@ def get_input_proxy2():
             method_list=method_list,
             input_file=filename,
             port_list=port_list,
-            output_file=output
+            output_file=output,
+            scheme=scheme
         ).set_proxy(proxy, proxy_username, proxy_password)
 
     return scanner, threads
@@ -257,9 +306,11 @@ def get_input_proxy2():
 def get_input_ssl():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
-        return None, None, None
+        return None, None
         
-    output, threads = get_common_inputs()
+    verify_tls = get_confirm(
+        " Only report hosts with a trusted, matching certificate?", default=False)
+    output, threads = get_common_inputs(filename)
     
     if cidr:
         try:
@@ -269,13 +320,15 @@ def get_input_ssl():
         from .scanners.ssl import CIDRSSLScanner
         scanner = CIDRSSLScanner(
             cidr_ranges=cidr_ranges,
-            output_file=output
+            output_file=output,
+            verify_tls=verify_tls
         )
     else:
         from .scanners.ssl import HostSSLScanner
         scanner = HostSSLScanner(
             input_file=filename,
-            output_file=output
+            output_file=output,
+            verify_tls=verify_tls
         )
     
     return scanner, threads
@@ -284,10 +337,10 @@ def get_input_ssl():
 def get_input_ping():
     filename, cidr = get_host_input()
     if filename is None and cidr is None:
-        return None, None, None
+        return None, None
         
-    port_list = get_input("Enter port(s)", validators="number", default="443").split(',')
-    output, threads = get_common_inputs()
+    port_list = parse_ports(get_input("Enter port(s)", validators="number", default="443"))
+    output, threads = get_common_inputs(filename)
     
     if cidr:
         try:
@@ -336,5 +389,8 @@ def get_user_input():
 
 def main():
     scanner, threads = get_user_input()
+    if scanner is None:
+        print("[yellow] No input provided - nothing to scan.[/yellow]")
+        return
     scanner.threads = int(threads)
     scanner.start()

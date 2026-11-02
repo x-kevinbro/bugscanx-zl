@@ -1,147 +1,161 @@
+"""Self-update for the BugScanX-ZL fork.
+
+The original updater ran `pip install --upgrade bugscan-x`, i.e. it pulled
+the *upstream* package from PyPI and silently replaced every ZL change. This
+version only ever updates from the ZL fork's own Git repository:
+
+- running from a git clone  -> `git pull --ff-only` in that clone
+- installed with pip        -> `pip install --upgrade git+<fork repo>@<branch>`
+
+Override the source with BUGSCANX_ZL_REPO / BUGSCANX_ZL_BRANCH. For a
+private repository set GITHUB_TOKEN so the version check can read it.
+"""
+
 import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from importlib.metadata import version
-from packaging.version import Version, parse as parse_version
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
+from packaging.version import InvalidVersion, parse as parse_version
 from rich.console import Console
+
 from bugscanx.utils.prompts import get_confirm
+
+PACKAGE_NAME = "bugscanx-zl"
+UPSTREAM_PACKAGE = "bugscan-x"
+DEFAULT_REPO = "https://github.com/x-kevinbro/bugscanx-zl"
+DEFAULT_BRANCH = "main"
+
+
+def _strip_git(url):
+    return url[:-4] if url.endswith(".git") else url
+
+
+def repo_url():
+    return _strip_git(os.environ.get("BUGSCANX_ZL_REPO", DEFAULT_REPO).rstrip("/"))
+
+
+def repo_branch():
+    return os.environ.get("BUGSCANX_ZL_BRANCH", DEFAULT_BRANCH)
+
+
+def raw_version_url(repo=None, branch=None):
+    """https://github.com/owner/name -> raw VERSION file URL (GitHub only)."""
+    repo = _strip_git((repo or repo_url()).rstrip("/"))
+    branch = branch or repo_branch()
+    prefix = "https://github.com/"
+    if not repo.startswith(prefix):
+        return None
+    owner_name = repo[len(prefix):]
+    return f"https://raw.githubusercontent.com/{owner_name}/{branch}/VERSION"
+
+
+def git_checkout_root():
+    """Repo root if bugscanx is running from a git clone, else None."""
+    root = Path(__file__).resolve().parents[3]
+    return root if (root / ".git").exists() else None
 
 
 @dataclass
 class VersionInfo:
     current_version: str
-    latest_stable: str = None
-    latest_prerelease: str = None
-    prerelease_is_newer: bool = False
+    latest_version: str = None
 
 
 class VersionManager:
-    def __init__(self, package_name="bugscan-x"):
+    def __init__(self, package_name=PACKAGE_NAME):
         self.package_name = package_name
         self.console = Console()
 
-    def _is_prerelease(self, version_str):
+    def current_version(self):
+        root = git_checkout_root()
+        if root and (root / "VERSION").is_file():
+            return (root / "VERSION").read_text(encoding="utf-8").strip()
         try:
-            return Version(version_str).is_prerelease
-        except Exception:
+            return version(self.package_name)
+        except PackageNotFoundError:
+            return "0"
+
+    def upstream_installed(self):
+        try:
+            version(UPSTREAM_PACKAGE)
+            return True
+        except PackageNotFoundError:
             return False
 
-    def _parse_pip_output(self, output):
-        lines = output.splitlines()
-        versions = {}
-        available_versions = []
+    def fetch_latest_version(self):
+        import requests
 
-        for line in lines:
-            line = line.strip()
-            if line.startswith('Available versions:'):
-                available_versions = [
-                    v.strip(' ,')
-                    for v in line.split(':', 1)[1].split()
-                ]
-            elif line.startswith('INSTALLED:'):
-                versions['installed'] = line.split(':')[1].strip()
-            elif line.startswith('LATEST:'):
-                versions['latest'] = line.split(':')[1].strip()
-
-        return versions, available_versions
-
-    def check_updates(self):
+        url = raw_version_url()
+        if not url:
+            return None
+        headers = {}
+        token = os.environ.get("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"token {token}"
         try:
-            with self.console.status(
-                "[yellow]Checking for updates...",
-                spinner="dots"
-            ):
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "pip",
-                        "index",
-                        "versions",
-                        self.package_name,
-                        "--pre",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=15,
-                )
-
-                versions_info, all_versions = self._parse_pip_output(result.stdout)
-                if not all_versions:
-                    self.console.print("[red] No version information found")
-                    return None
-
-                current_version = versions_info.get('installed') or version(self.package_name)
-                current_ver = parse_version(current_version)
-                stable_versions = [v for v in all_versions if not self._is_prerelease(v)]
-
-                latest_stable = stable_versions[0] if stable_versions else None
-                latest_prerelease = all_versions[0] if all_versions else None
-
-                if not latest_prerelease or current_ver >= parse_version(latest_prerelease):
-                    self.console.print(f"[green] You're up to date: {current_version}")
-                    return None
-
-                if self._is_prerelease(latest_prerelease) and current_ver >= parse_version(latest_prerelease):
-                    latest_prerelease = None
-
-                if latest_stable and current_ver >= parse_version(latest_stable):
-                    latest_stable = None
-
-                if not latest_stable and not latest_prerelease:
-                    self.console.print(f"[green] You're up to date: {current_version}")
-                    return None
-
-                return VersionInfo(
-                    current_version=current_version,
-                    latest_stable=latest_stable,
-                    latest_prerelease=latest_prerelease,
-                    prerelease_is_newer=(
-                        latest_stable
-                        and latest_prerelease
-                        and self._is_prerelease(latest_prerelease)
-                        and parse_version(latest_prerelease) > parse_version(latest_stable)
-                    )
-                )
-
-        except subprocess.TimeoutExpired:
-            self.console.print("[red] Update check timed out. Please check your internet connection.")
-        except subprocess.CalledProcessError:
-            self.console.print("[red] Failed to check updates")
-        except Exception:
-            self.console.print("[red] Error checking updates")
+            resp = requests.get(url, headers=headers, timeout=10)
+        except requests.RequestException as exc:
+            self.console.print(f"[red] Could not reach GitHub: {exc}")
+            return None
+        if resp.status_code == 200:
+            return resp.text.strip()
+        if resp.status_code == 404:
+            self.console.print(
+                "[red] Could not read the remote VERSION file. If the repository is "
+                "private, set GITHUB_TOKEN and try again.")
+        else:
+            self.console.print(f"[red] Version check failed (HTTP {resp.status_code})")
         return None
 
-    def install_update(self, install_prerelease=False):
+    def check_updates(self):
+        if self.upstream_installed():
+            self.console.print(
+                f"[yellow] Warning: the upstream '{UPSTREAM_PACKAGE}' package is also "
+                f"installed and provides the same 'bugscanx' module. Remove it with: "
+                f"pip uninstall {UPSTREAM_PACKAGE}")
+
+        current = self.current_version()
+        with self.console.status("[yellow]Checking for updates...", spinner="dots"):
+            latest = self.fetch_latest_version()
+        if not latest:
+            return None
+        try:
+            newer = parse_version(latest) > parse_version(current)
+        except InvalidVersion:
+            self.console.print(f"[red] Unrecognised version string: {latest!r}")
+            return None
+        if not newer:
+            self.console.print(f"[green] You're up to date: {current}")
+            return None
+        return VersionInfo(current_version=current, latest_version=latest)
+
+    def update_commands(self):
+        root = git_checkout_root()
+        if root:
+            return [["git", "-C", str(root), "pull", "--ff-only"]]
+        return [[
+            sys.executable, "-m", "pip", "install", "--upgrade",
+            f"git+{repo_url()}.git@{repo_branch()}",
+        ]]
+
+    def install_update(self):
         try:
             with self.console.status("[yellow]Installing update...", spinner="point"):
-                cmd = [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    self.package_name,
-                ]
-                if install_prerelease:
-                    cmd.insert(-1, "--pre")
-
-                subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=60,
-                )
-                self.console.print("[green] Update successful!")
-                return True
+                for cmd in self.update_commands():
+                    subprocess.run(cmd, capture_output=True, text=True,
+                                   check=True, timeout=180)
+            self.console.print("[green] Update successful!")
+            return True
+        except subprocess.CalledProcessError as e:
+            detail = (e.stderr or e.stdout or "").strip().splitlines()[-1:] or [str(e)]
+            self.console.print(f"[red] Installation failed: {detail[0]}")
         except Exception as e:
-            self.console.print(f"[red] Installation failed: {str(e)}")
-            return False
+            self.console.print(f"[red] Installation failed: {e}")
+        return False
 
     def restart_application(self):
         self.console.print("[yellow] Restarting application...")
@@ -152,34 +166,17 @@ class VersionManager:
 def main():
     manager = VersionManager()
     try:
-        version_info = manager.check_updates()
-        if not version_info:
+        info = manager.check_updates()
+        if not info:
             return
-
-        if version_info.prerelease_is_newer:
-            manager.console.print(
-                f"[yellow] Pre-release update available: {version_info.current_version} → {version_info.latest_prerelease}"
-            )
-            manager.console.print("[red] Warning: Pre-release versions may be unstable and contain bugs.")
-            if not get_confirm(" I understand the risks, update anyway"):
-                if version_info.latest_stable and parse_version(version_info.latest_stable) > parse_version(version_info.current_version):
-                    if get_confirm(f" Update to stable version {version_info.latest_stable}"):
-                        if manager.install_update(install_prerelease=False):
-                            manager.restart_application()
-                return
-            else:
-                if manager.install_update(install_prerelease=True):
-                    manager.restart_application()
-        else:
-            manager.console.print(
-                f"[yellow] Update available: {version_info.current_version} → {version_info.latest_stable}"
-            )
-            if not get_confirm(" Update now"):
-                return
-            if manager.install_update(install_prerelease=False):
-                manager.restart_application()
-
+        manager.console.print(
+            f"[yellow] Update available: {info.current_version} → {info.latest_version}"
+            f" [dim](from {repo_url()} @ {repo_branch()})[/dim]")
+        if not get_confirm(" Update now"):
+            return
+        if manager.install_update():
+            manager.restart_application()
     except KeyboardInterrupt:
         manager.console.print("[yellow] Update cancelled by user.")
     except Exception as e:
-        manager.console.print(f"[red] Error during update process: {str(e)}")
+        manager.console.print(f"[red] Error during update process: {e}")

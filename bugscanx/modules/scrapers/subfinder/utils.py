@@ -1,3 +1,4 @@
+import os
 import re
 import random
 import threading
@@ -5,8 +6,19 @@ import requests
 from requests.adapters import HTTPAdapter
 from bugscanx.utils.http import HEADERS, USER_AGENTS
 
-requests.packages.urllib3.disable_warnings(
-    requests.packages.urllib3.exceptions.InsecureRequestWarning)
+# Subdomain data comes from third-party APIs (crt.sh, hackertarget, ...), so
+# their certificates are verified by default. Set BUGSCANX_INSECURE_SOURCES=1
+# only if you are behind an intercepting proxy you trust.
+INSECURE_ENV = 'BUGSCANX_INSECURE_SOURCES'
+
+
+def verify_sources():
+    return os.environ.get(INSECURE_ENV, '').strip().lower() not in ('1', 'true', 'yes', 'on')
+
+
+if not verify_sources():
+    requests.packages.urllib3.disable_warnings(
+        requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 
 class RequestHandler:
@@ -26,7 +38,7 @@ class RequestHandler:
         session = getattr(self._tls, 'session', None)
         if session is None:
             session = requests.Session()
-            session.verify = False
+            session.verify = verify_sources()
             adapter = HTTPAdapter(pool_connections=2, pool_maxsize=4)
             session.mount('http://', adapter)
             session.mount('https://', adapter)
@@ -38,6 +50,19 @@ class RequestHandler:
         headers["user-agent"] = random.choice(USER_AGENTS)
         return headers
 
+    # Per-thread "why did the last request fail" slot. A worker runs one
+    # (domain, source) task at a time, so the engine can clear it before
+    # fetch() and read it afterwards to tell "source failed" from "no subs".
+    def clear_error(self):
+        self._tls.last_error = None
+
+    def last_error(self):
+        return getattr(self._tls, 'last_error', None)
+
+    def _set_error(self, reason):
+        if getattr(self._tls, 'last_error', None) is None:
+            self._tls.last_error = reason
+
     def get(self, url, timeout=None):
         try:
             response = self._session().get(
@@ -47,8 +72,18 @@ class RequestHandler:
             )
             if response.status_code == 200:
                 return response
+            if response.status_code == 429:
+                self._set_error('rate limited')
+            else:
+                self._set_error(f'http {response.status_code}')
+        except requests.exceptions.SSLError:
+            self._set_error('tls error')
+        except requests.exceptions.Timeout:
+            self._set_error('timeout')
+        except requests.exceptions.ConnectionError:
+            self._set_error('connection error')
         except requests.RequestException:
-            pass
+            self._set_error('request error')
         return None
 
     def __enter__(self):

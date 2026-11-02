@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+import traceback
+from collections import Counter
 from abc import ABC, abstractmethod
 from queue import Queue, Empty
 from threading import Thread, RLock, Event
@@ -85,6 +87,8 @@ class MultiThread(ABC):
         self._success = []
         self._success_count = 0
         self._current = ''
+        self._failures = Counter()
+        self._task_errors = 0
         self._start_time = None
         self._reporter = None
 
@@ -174,12 +178,70 @@ class MultiThread(ABC):
                 return
             try:
                 self.task(task)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_task_error(task, exc)
             finally:
                 with self._lock:
                     self._scanned += 1
                 self._queue.task_done()
+
+    # ------------------------------------------------------------- failures
+
+    DEBUG_ENV = 'BUGSCANX_DEBUG'
+    DEBUG_LOG = 'bugscanx-debug.log'
+
+    @classmethod
+    def debug_enabled(cls):
+        return os.environ.get(cls.DEBUG_ENV, '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+    def record_failure(self, reason, detail=None):
+        """Count an expected network-level failure (timeout, refused, DNS,
+        TLS ...). These are normal while scanning, but they are reported
+        separately from "no result" so a broken network or a dead data
+        source is visible instead of looking like an empty scan."""
+        with self._lock:
+            self._failures[reason or 'error'] += 1
+        if detail is not None and self.debug_enabled():
+            self._debug_write(f"[failure] {reason}: {detail}")
+
+    def _record_task_error(self, task, exc):
+        """Unexpected exception inside task() - a bug, not a network miss."""
+        with self._lock:
+            self._task_errors += 1
+            first = self._task_errors == 1
+        if self.debug_enabled():
+            self._debug_write(
+                f"[task error] task={task!r}\n"
+                + ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        elif first:
+            self.logger.log(self.logger.colorize(
+                f"Internal error while scanning: {type(exc).__name__}: {exc} "
+                f"(set {self.DEBUG_ENV}=1 for full tracebacks in {self.DEBUG_LOG})",
+                'RED'))
+
+    def _debug_write(self, text):
+        try:
+            with self._lock:
+                with open(self.DEBUG_LOG, 'a', encoding='utf-8') as f:
+                    f.write(text.rstrip('\n') + '\n')
+        except OSError:
+            pass
+
+    def failure_summary(self):
+        with self._lock:
+            failures = dict(self._failures)
+            task_errors = self._task_errors
+        parts = [f"{name} {count}" for name, count in
+                 sorted(failures.items(), key=lambda kv: -kv[1])]
+        if task_errors:
+            parts.append(f"internal errors {task_errors}")
+        return ', '.join(parts)
+
+    def _log_failure_summary(self):
+        summary = self.failure_summary()
+        if summary:
+            self.logger.log(self.logger.colorize(
+                f"Failures: {summary}", 'GRAY'))
 
     # ------------------------------------------------------------- progress
 
@@ -275,12 +337,14 @@ class MultiThread(ABC):
         self.logger.log(self.logger.colorize(
             f"Scan completed in {self._fmt_duration(elapsed)} - "
             f"{scanned}/{total} scanned - {hits} hits", "GREEN"))
+        self._log_failure_summary()
 
     def interrupted(self):
         scanned, total, hits, _ = self._snapshot()
         self.logger.log(self.logger.colorize(
             f"Scan stopped by user (Ctrl+C) - "
             f"{scanned}/{total} scanned, {hits} hits so far", "YELLOW"))
+        self._log_failure_summary()
 
     @abstractmethod
     def generate_tasks(self): pass

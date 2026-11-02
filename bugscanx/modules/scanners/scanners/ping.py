@@ -1,6 +1,6 @@
 import socket
 
-from .base import BaseScanner
+from .base import BaseScanner, classify_error
 
 
 class PingScannerBase(BaseScanner):
@@ -26,20 +26,14 @@ class PingScannerBase(BaseScanner):
             return
 
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(2)
-                result = sock.connect_ex((host, int(port)))
-
-            if result == 0:
-                data = {
-                    'host': host,
-                    'port': port
-                }
-
-                self._handle_success(data)
-
-        except Exception:
-            pass
+            # create_connection() handles IPv4 and IPv6 and raises on
+            # refused/timeout, so each failure reason is reported
+            with socket.create_connection((host, int(port)), timeout=2):
+                pass
+        except (OSError, ValueError) as exc:
+            self.record_failure(classify_error(exc), f"{host}:{port}: {exc}")
+        else:
+            self._handle_success({'host': host, 'port': port})
 
         self.progress(f"{host}:{port}")
 

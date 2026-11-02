@@ -2,18 +2,42 @@ import socket
 import ssl
 
 from bugscanx.utils.domains import resolve_host
-from .base import BaseScanner
+from .base import BaseScanner, classify_error
+
+
+TLS_UNVERIFIED_NOTE = (
+    "Note: certificates are NOT verified in this mode - a successful "
+    "handshake means the SNI is reachable, not that its certificate is trusted."
+)
 
 
 class SSLScannerBase(BaseScanner):
     def __init__(
         self,
+        verify_tls=False,
+        port=443,
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.tls_context = ssl.create_default_context()
-        self.tls_context.check_hostname = False
-        self.tls_context.verify_mode = ssl.CERT_NONE
+        self.verify_tls = bool(verify_tls)
+        self.port = int(port)
+        if self.verify_tls:
+            # full chain + hostname validation: only trusted certs are hits
+            self.tls_context = ssl.create_default_context()
+        else:
+            # probing mode: any certificate is accepted so that SNI hosts
+            # with self-signed / mismatched certs are still discovered
+            self.tls_context = ssl.create_default_context()
+            self.tls_context.check_hostname = False
+            self.tls_context.verify_mode = ssl.CERT_NONE
+
+    def log_tls_mode(self):
+        if self.verify_tls:
+            self.logger.log(self.logger.colorize(
+                "Certificate verification ON - only trusted certificates are reported.",
+                'GRAY'))
+        else:
+            self.logger.log(self.logger.colorize(TLS_UNVERIFIED_NOTE, 'GRAY'))
 
     def resolve_ip(self, host):
         return resolve_host(host, timeout=4.0) or "Unknown"
@@ -25,9 +49,7 @@ class SSLScannerBase(BaseScanner):
             return
 
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_client:
-                socket_client.settimeout(2)
-                socket_client.connect((sni, 443))
+            with socket.create_connection((sni, self.port), timeout=2) as socket_client:
                 with self.tls_context.wrap_socket(
                     socket_client,
                     server_hostname=sni,
@@ -40,8 +62,8 @@ class SSLScannerBase(BaseScanner):
                     }
 
                     self._handle_success(data)
-        except Exception:
-            pass
+        except (OSError, ssl.SSLError) as exc:
+            self.record_failure(classify_error(exc), f"{sni}: {exc}")
 
         self.progress(sni)
 
@@ -83,6 +105,7 @@ class HostSSLScanner(SSLScannerBase):
         self.write_scan_metadata(self.input_file)
         self.log_info(tls_version='TLS', ip='IP', sni='SNI')
         self.log_info(tls_version='---', ip='--', sni='---')
+        self.log_tls_mode()
 
     def _handle_success(self, data):
         data['ip'] = self.resolve_ip(data['sni'])
@@ -126,6 +149,7 @@ class CIDRSSLScanner(SSLScannerBase):
         self.write_scan_metadata()
         self.log_info(tls_version='TLS', sni='SNI')
         self.log_info(tls_version='---', sni='---')
+        self.log_tls_mode()
 
     def _handle_success(self, data):
         self.success(data)
