@@ -44,10 +44,10 @@ class RequestHandler:
             pass
         return None
 
-    def post(self, url, data=None):
+    def post(self, url, data=None, timeout=10):
         self.rate_limiter.acquire()
         try:
-            response = self.session.post(url, data=data, headers=self._get_headers())
+            response = self.session.post(url, data=data, timeout=timeout, headers=self._get_headers())
             if response.status_code == 200:
                 return response
         except requests.RequestException:

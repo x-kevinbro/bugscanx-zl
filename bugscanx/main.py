@@ -13,6 +13,7 @@ MENU_OPTIONS = {
     '7': ("HOST INFO", "bold blue"),
     '8': ("HELP", "bold yellow"),
     '9': ("UPDATE", "bold magenta"),
+    '10': ("ZL SCANNER", "bold green"),
     '0': ("EXIT", "bold red"),
 }
 

@@ -60,14 +60,64 @@ class YouGetSignalSource(DomainSource):
         data = {'remoteAddress': ip, 'key': '', '_': ''}
         response = self.post("https://domains.yougetsignal.com/domains.php", data=data)
         if response:
+            try:
+                payload = response.json()
+            except ValueError:
+                return domains
             domains.update(
-                domain[0] for domain in response.json().get("domainArray", [])
+                domain[0] for domain in (payload.get("domainArray") or [])
+                if domain and domain[0]
             )
         return domains
+
+
+class HackerTargetReverseSource(DomainSource):
+    """Free reverse-IP API (small daily quota, plain-text answer)."""
+
+    def __init__(self):
+        super().__init__("HackerTarget")
+
+    def fetch(self, ip):
+        response = self.get(f"https://api.hackertarget.com/reverseiplookup/?q={ip}")
+        if not response:
+            return set()
+        text = response.text.strip()
+        lowered = text.lower()
+        if (not text or lowered.startswith(('error', 'api count', 'no dns'))
+                or 'exceeded' in lowered):
+            return set()
+        return {line.strip().lower() for line in text.splitlines()
+                if line.strip() and ' ' not in line.strip()}
+
+
+class PTRSource(DomainSource):
+    """Local reverse DNS (PTR) - works even when the web sources are down."""
+
+    def __init__(self):
+        super().__init__("PTR")
+
+    def fetch(self, ip):
+        import socket
+        import threading
+        out = set()
+
+        def _work():
+            try:
+                name, aliases, _ = socket.gethostbyaddr(ip)
+                out.update(n.rstrip('.').lower() for n in [name, *aliases] if n)
+            except (OSError, UnicodeError):
+                pass
+
+        t = threading.Thread(target=_work, daemon=True)
+        t.start()
+        t.join(5)
+        return set(out)
 
 
 def get_scrapers():
     return [
         RapidDNSSource(),
-        YouGetSignalSource()
+        YouGetSignalSource(),
+        HackerTargetReverseSource(),
+        PTRSource(),
     ]
