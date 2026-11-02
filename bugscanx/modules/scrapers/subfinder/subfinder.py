@@ -2,7 +2,8 @@ import os
 import threading
 
 from bugscanx.modules.scanners.scanners.multithread import MultiThread
-from bugscanx.utils.prompts import get_input
+from bugscanx.utils.files import check_output_path, resolve_output_mode
+from bugscanx.utils.prompts import get_confirm, get_input
 from .logger import SubFinderConsole
 from .sources import get_sources
 from .utils import DomainValidator
@@ -25,11 +26,15 @@ class SubFinderEngine(MultiThread):
     everything found so far.
     """
 
-    def __init__(self, domains, sources, output_file, threads=DEFAULT_THREADS):
+    def __init__(self, domains, sources, output_file, threads=DEFAULT_THREADS,
+                 mode='w'):
         super().__init__(threads=threads)
+        if mode not in ('w', 'a'):
+            raise ValueError("mode must be 'w' or 'a'")
         self.domains = domains
         self.sources = sources
         self.output_file = output_file
+        self.mode = mode
         self._results = {d: set() for d in domains}
         self._pending = {d: len(sources) for d in domains}
         self._domains_done = 0
@@ -44,19 +49,29 @@ class SubFinderEngine(MultiThread):
 
     def init(self):
         os.makedirs(os.path.dirname(self.output_file) or '.', exist_ok=True)
-        with self._save_lock:
-            with open(self.output_file, 'w', encoding='utf-8'):
-                pass  # start every run with a fresh output file
+        if self.mode == 'w':
+            # only reached after the caller confirmed overwriting
+            with self._save_lock:
+                with open(self.output_file, 'w', encoding='utf-8'):
+                    pass
 
     def task(self, payload):
         domain, source = payload
         self.progress(f"{source.name} {domain}")
 
+        clear = getattr(source, 'clear_error', None)
+        if clear:
+            clear()
         try:
             found = source.fetch(domain)
             found = DomainValidator.filter_valid_subdomains(found, domain)
-        except Exception:
+        except Exception as exc:
             found = set()
+            self.record_failure(f"{source.name}: parse error", f"{domain}: {exc!r}")
+        else:
+            err = getattr(source, 'last_error', lambda: None)()
+            if err:
+                self.record_failure(f"{source.name}: {err}", domain)
 
         if found:
             with self._lock:
@@ -114,34 +129,70 @@ class SubFinder:
     def __init__(self):
         self.console = SubFinderConsole()
 
-    def run(self, domains, output_file, sources, threads=DEFAULT_THREADS):
+    def run(self, domains, output_file, sources, threads=DEFAULT_THREADS,
+            mode='w'):
         domains = [d for d in dict.fromkeys(domains)
                    if DomainValidator.is_valid_domain(d)]
         if not domains:
             self.console.print_error("No valid domains provided")
             return set()
 
-        engine = SubFinderEngine(domains, sources, output_file, threads=threads)
+        engine = SubFinderEngine(domains, sources, output_file,
+                                 threads=threads, mode=mode)
         engine.start()
         return set(engine._all)
 
 
+def ask_source_mode():
+    choice = get_input(
+        "Select search mode",
+        input_type="choice",
+        choices=[
+            "Thorough - all sources, waits for slow ones (most subdomains)",
+            "Fast - short timeouts, skips Wayback (quicker, can miss some)",
+        ],
+    )
+    return "fast" if choice.startswith("Fast") else "thorough"
+
+
 def main():
     domains = []
-    sources = get_sources()
+    file_path = None
     input_type = get_input("Select input mode", input_type="choice", choices=["Manual", "File"])
     if input_type == "Manual":
         domain_input = get_input("Enter domain(s)", validators="required")
-        domains = [d.strip() for d in domain_input.split(',') if DomainValidator.is_valid_domain(d.strip())]
+        domains = [d.strip().lower() for d in domain_input.split(',') if DomainValidator.is_valid_domain(d.strip())]
         default_output = f"{domains[0]}_subdomains.txt" if domains else "subdomains.txt"
     else:
         file_path = get_input("Enter filename", input_type="file", validators="file")
         with open(file_path, 'r') as f:
-            domains = [d.strip() for d in f if DomainValidator.is_valid_domain(d.strip())]
+            domains = [d.strip().lower() for d in f if DomainValidator.is_valid_domain(d.strip())]
         default_output = f"{file_path.rsplit('.', 1)[0]}_subdomains.txt"
 
-    output_file = get_input("Enter output filename", default=default_output, validators="required")
+    while True:
+        output_file = get_input("Enter output filename", default=default_output, validators="required")
+        error = check_output_path(output_file, input_files=[file_path])
+        if error:
+            print(f" {error}")
+            continue  # e.g. output == input file: ask again
+        mode = resolve_output_mode(output_file, input_files=[file_path])
+        if mode is None:
+            print(" Cancelled - nothing was written.")
+            return
+        break
+    sources = get_sources(ask_source_mode())
+    brute = get_confirm(
+        " Also DNS-check common names (www, api, mail, ...) to find hosts "
+        "missing from public records?", default=False)
     threads = get_input("Enter threads", validators="number", default=str(DEFAULT_THREADS))
     print()
     subfinder = SubFinder()
-    subfinder.run(domains, output_file, sources, threads=int(threads or DEFAULT_THREADS))
+    found = subfinder.run(domains, output_file, sources,
+                          threads=int(threads or DEFAULT_THREADS), mode=mode) or set()
+    if brute and domains:
+        from .wildcard import expand_wildcards
+        extra = expand_wildcards(domains, drop_dns_wildcards=True) - found
+        if extra:
+            with open(output_file, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(sorted(extra)) + '\n')
+        print(f" DNS check added {len(extra)} new host(s) -> {output_file}")

@@ -5,7 +5,7 @@ import urllib3
 from requests.adapters import HTTPAdapter
 
 from bugscanx.utils.domains import resolve_host
-from .base import BaseScanner
+from .base import BaseScanner, classify_error
 from bugscanx.utils.config import EXCLUDE_LOCATIONS
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -29,6 +29,18 @@ class DirectScannerBase(BaseScanner):
         self.no302 = no302
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self._tls = threading.local()
+        self._dns_cache = {}
+        self._dns_lock = threading.Lock()
+
+    def resolve_cached(self, host):
+        """Resolve each host once per scan, not once per (method x port)."""
+        with self._dns_lock:
+            if host in self._dns_cache:
+                return self._dns_cache[host]
+        ip = resolve_host(host, timeout=max(2.0, float(self.timeout)))
+        with self._dns_lock:
+            self._dns_cache[host] = ip
+        return ip
 
     def _session(self):
         """One keep-alive session per worker thread (never shared across
@@ -46,15 +58,15 @@ class DirectScannerBase(BaseScanner):
     def request(self, method, url, **kwargs):
         method = method.upper()
         kwargs['timeout'] = self.timeout
+        # Only the status line and headers are needed. stream=True stops
+        # requests from downloading the whole body (large pages, slow or
+        # trickling bodies used to hold a worker for the full download).
+        kwargs.setdefault('stream', True)
         self.progress(method, url)
         try:
             return self._session().request(method, url, **kwargs)
-        except (
-            requests.exceptions.ConnectionError,
-            requests.exceptions.ReadTimeout,
-            requests.exceptions.Timeout,
-            requests.exceptions.RequestException
-        ):
+        except requests.exceptions.RequestException as exc:
+            self.record_failure(classify_error(exc), f"{method} {url}: {exc}")
             return None
 
     def task(self, payload):
@@ -62,14 +74,17 @@ class DirectScannerBase(BaseScanner):
         host = payload['host']
         port = payload['port']
 
-        ip = resolve_host(host, timeout=max(2.0, float(self.timeout)))
+        ip = self.resolve_cached(host)
         if not ip:
+            self.record_failure('dns error', host)
             return
 
         response = self.request(method, self.get_url(host, port), verify=False, allow_redirects=False)
 
         if response is None:
             return
+        # headers are already parsed; drop the body without reading it
+        response.close()
 
         if self.no302 and response.status_code == 302:
             return

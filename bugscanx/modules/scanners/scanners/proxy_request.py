@@ -1,6 +1,7 @@
 import requests
 from urllib.parse import urlparse, urlunparse
 
+from .base import classify_error
 from .direct import DirectScannerBase
 
 
@@ -44,6 +45,7 @@ class Proxy2ScannerBase(DirectScannerBase):
     def request(self, method, url, **kwargs):
         method = method.upper()
         kwargs['timeout'] = self.timeout
+        kwargs.setdefault('stream', True)  # headers only, see DirectScannerBase
         max_attempts = self.DEFAULT_RETRY
 
         for attempt in range(max_attempts):
@@ -56,11 +58,15 @@ class Proxy2ScannerBase(DirectScannerBase):
                 requests.exceptions.Timeout,
                 requests.exceptions.ProxyError
             ) as e:
+                if attempt == max_attempts - 1:
+                    self.record_failure(classify_error(e), f"{method} {url}: {e}")
+                    return None
                 wait_time = 1 if isinstance(e, requests.exceptions.ConnectionError) else 5
                 for _ in self.sleep(wait_time):
                     self.progress(f"{method} (via proxy) {url}")
-                if attempt == max_attempts - 1:
-                    return None
+            except requests.exceptions.RequestException as e:
+                self.record_failure(classify_error(e), f"{method} {url}: {e}")
+                return None
         return None
 
 

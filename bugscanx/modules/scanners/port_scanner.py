@@ -18,12 +18,23 @@ COMMON_PORTS = [
 ]
 
 
-def scan_port(ip, port):
+# range() excludes its stop value, so 65536 is needed to include port 65535
+MIN_PORT = 1
+MAX_PORT = 65535
+ALL_PORTS = range(MIN_PORT, MAX_PORT + 1)
+
+
+def get_ports(scan_type):
+    return COMMON_PORTS if scan_type == "Common ports" else ALL_PORTS
+
+
+def scan_port(ip, port, timeout=1):
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1)
+        family = socket.AF_INET6 if ':' in ip else socket.AF_INET
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
             return port if sock.connect_ex((ip, port)) == 0 else None
-    except:
+    except OSError:
         return None
 
 
@@ -43,7 +54,7 @@ def main():
         input_type="choice",
         choices=["Common ports", "All ports (1-65535)"]
     )
-    ports = COMMON_PORTS if scan_type == "Common ports" else range(1, 65535)
+    ports = get_ports(scan_type)
 
     console.print(
         f"\n[bold green] Target Info:[/]\n"
@@ -63,13 +74,23 @@ def main():
     ) as progress:
         task = progress.add_task(" Scanning ports", total=len(ports))
 
-        with ThreadPoolExecutor(max_workers=100) as executor:
-            futures = [executor.submit(scan_port, ip, port) for port in ports]
+        executor = ThreadPoolExecutor(max_workers=100)
+        futures = [executor.submit(scan_port, ip, port) for port in ports]
+        try:
             for future in as_completed(futures):
-                if result := future.result():
+                result = future.result()
+                if result:
                     open_ports.append(result)
                     progress.console.print(f" [green]✓[/] Port {result} is open")
                 progress.advance(task)
+        except KeyboardInterrupt:
+            # drop every queued port instead of waiting for all of them
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=False)
+            console.print("\n[yellow] Scan stopped by user (Ctrl+C) - showing ports found so far.[/]")
+        else:
+            executor.shutdown(wait=True)
 
     if not open_ports:
         console.print("\n[yellow] No open ports found.[/]\n")

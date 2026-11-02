@@ -4,6 +4,9 @@ Domain helpers for BugScanX (continuation patch).
 - normalize_host():       'https://m.instagram.com:443/x' -> 'm.instagram.com'
 - main_domain():          'm.instagram.com' -> 'instagram.com'
                           'a.b.example.co.uk' -> 'example.co.uk'  (suffix-aware)
+                          Uses the Public Suffix List (via tldextract, offline
+                          bundled snapshot) when installed; falls back to the
+                          built-in MULTI_SUFFIXES table otherwise.
 - unique_main_domains():  each main domain only once, first-seen order
 - read_hosts_file():      normalized, de-duplicated host list from a txt file
 - resolve_host():         DNS resolution with a hard timeout - the scanner
@@ -58,17 +61,76 @@ def is_ip(host):
     return False
 
 
-def main_domain(host):
-    """Registrable (main) domain of a host. IPs and dotless names pass through."""
-    if is_ip(host) or "." not in host:
-        return host
+_extractor = None
+_extractor_lock = threading.Lock()
+_EXTRACTOR_UNAVAILABLE = object()
+
+
+def _get_extractor():
+    """Lazily build an offline Public Suffix List extractor.
+
+    suffix_list_urls=() makes tldextract use its bundled snapshot only, so it
+    never makes network requests at runtime. Private
+    suffixes (github.io, blogspot.com, ...) are included so that a host like
+    'me.github.io' maps to 'me.github.io', never to the shared 'github.io'.
+    """
+    global _extractor
+    if _extractor is None:
+        with _extractor_lock:
+            if _extractor is None:
+                try:
+                    import tldextract
+                    _extractor = tldextract.TLDExtract(
+                        suffix_list_urls=(),
+                        include_psl_private_domains=True,
+                    )
+                except Exception:
+                    _extractor = _EXTRACTOR_UNAVAILABLE
+    return None if _extractor is _EXTRACTOR_UNAVAILABLE else _extractor
+
+
+def _fallback_main_domain(host):
     parts = host.split(".")
     if len(parts) <= 2:
-        return host
+        return None if host in MULTI_SUFFIXES else host
     last2 = ".".join(parts[-2:])
-    if last2 in MULTI_SUFFIXES and len(parts) >= 3:
+    if last2 in MULTI_SUFFIXES:
         return ".".join(parts[-3:])
     return last2
+
+
+def is_public_suffix(host):
+    """True if host is itself a public suffix (e.g. 'co.uk', 'github.io')."""
+    if not host or is_ip(host):
+        return False
+    ext = _get_extractor()
+    if ext is not None:
+        r = ext(host)
+        return not r.domain and bool(r.suffix)
+    return host in MULTI_SUFFIXES
+
+
+def main_domain(host):
+    """Registrable (main) domain of a host.
+
+    IPs and dotless names pass through unchanged. Returns None when the host
+    is a bare public suffix (e.g. 'co.uk') - enumerating that would mean
+    scanning every site under the suffix, far outside the intended scope.
+    """
+    if not host:
+        return None
+    host = host.lower().strip(".")
+    if is_ip(host) or "." not in host:
+        return host
+    ext = _get_extractor()
+    if ext is not None:
+        r = ext(host)
+        if r.domain and r.suffix:
+            return f"{r.domain}.{r.suffix}"
+        if not r.domain and r.suffix:
+            return None  # host is a public suffix
+        # unknown TLD (internal names etc.) - use the heuristic below
+    return _fallback_main_domain(host)
 
 
 def read_hosts_file(path):
@@ -96,6 +158,9 @@ def unique_main_domains(hosts):
     skipped = 0
     for h in hosts:
         d = main_domain(h)
+        if d is None:  # bare public suffix - never enumerate
+            skipped += 1
+            continue
         if d in seen:
             skipped += 1
             continue

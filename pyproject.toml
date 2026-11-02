@@ -1,10 +1,10 @@
 [project]
-name = "bugscan-x"
+name = "bugscanx-zl"
 dynamic = ["version"]
-description = "All-in-one tool for SNI discovery"
+description = "BugScanX-ZL - all-in-one tool for SNI discovery (ZL fork of bugscan-x)"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 
 authors = [
     { name = "Ayan Rajpoot", email = "ayanrajpoot2004@gmail.com" }
@@ -27,6 +27,7 @@ dependencies = [
     "pyfiglet",
     "requests",
     "rich",
+    "tldextract>=3.1",
     "tqdm",
 ]
 
@@ -34,10 +35,15 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
 [project.urls]
-Homepage = "https://github.com/FreeNetLabs/bugscanx"
+Homepage = "https://github.com/x-kevinbro/bugscanx-zl"
+Upstream = "https://github.com/FreeNetLabs/bugscanx"
 
 [project.scripts]
 bugscanx = "bugscanx.main:main"
@@ -50,6 +56,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages.find = {}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools.dynamic]
 version = { file = "VERSION" }

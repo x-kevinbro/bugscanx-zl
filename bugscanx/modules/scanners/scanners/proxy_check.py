@@ -1,6 +1,6 @@
 import socket
 
-from .base import BaseScanner
+from .base import BaseScanner, classify_error
 
 
 class ProxyScannerBase(BaseScanner):
@@ -35,31 +35,47 @@ class ProxyScannerBase(BaseScanner):
             with socket.create_connection((proxy_host, int(port)), timeout=3) as conn:
                 conn.sendall(formatted_payload.encode())
                 conn.settimeout(3)
-                data = b''
-                while True:
-                    chunk = conn.recv(1024)
-                    if not chunk:
-                        break
-                    data += chunk
+                data = self._read_response_head(conn)
+        except (OSError, ValueError) as exc:
+            self.record_failure(classify_error(exc), f"{proxy_host_port}: {exc}")
+            data = None
 
-                response = data.decode(errors='ignore').split('\r\n\r\n')[0]
-                response_lines = [line.strip() for line in response.split('\r\n') if line.strip()]
+        if data:
+            response = data.decode(errors='ignore').split('\r\n\r\n')[0]
+            response_lines = [line.strip() for line in response.split('\r\n') if line.strip()]
 
-                status_code = response_lines[0].split(' ')[1] if response_lines and len(response_lines[0].split(' ')) > 1 else 'N/A'
-                if status_code not in ['N/A', '302']:
-                    self.success({'proxy_host': proxy_host, 'port': port, 'status_code': status_code, 'response': response_lines})
-                    self.log_info(proxy_host_port, status_code, response_lines)
-
-        except Exception:
-            pass
-        finally:
-            if 'conn' in locals():
-                try:
-                    conn.close()
-                except:
-                    pass
+            first = response_lines[0].split(' ') if response_lines else []
+            status_code = first[1] if len(first) > 1 else 'N/A'
+            if status_code not in ['N/A', '302']:
+                self.success({'proxy_host': proxy_host, 'port': port, 'status_code': status_code, 'response': response_lines})
+                self.log_info(proxy_host_port, status_code, response_lines)
+        elif data is not None:
+            self.record_failure('no response')
 
         self.progress(f"{proxy_host}")
+
+    MAX_HEAD = 64 * 1024
+
+    @classmethod
+    def _read_response_head(cls, conn):
+        """Read until the end of the response headers.
+
+        Previously the loop read until the server closed the connection.
+        A successful "101 Switching Protocols" keeps the socket open, so the
+        read timed out, the exception was swallowed and the best result
+        (101) was silently thrown away. Now we stop at the blank line that
+        ends the headers and keep whatever arrived before a timeout.
+        """
+        data = b''
+        while b'\r\n\r\n' not in data and len(data) < cls.MAX_HEAD:
+            try:
+                chunk = conn.recv(4096)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            data += chunk
+        return data
 
     def log_info(self, proxy_host_port, status_code, response_lines=None):
         if response_lines is None:
