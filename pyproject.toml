@@ -4,7 +4,7 @@ dynamic = ["version"]
 description = "BugScanX-ZL - all-in-one tool for SNI discovery (ZL fork of bugscan-x)"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 authors = [
     { name = "Ayan Rajpoot", email = "ayanrajpoot2004@gmail.com" }

@@ -10,11 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      # uv can still install EOL interpreters such as 3.8, which
-      # actions/setup-python no longer provides on ubuntu-latest
       - uses: astral-sh/setup-uv@v6
       - name: Install
         run: |
