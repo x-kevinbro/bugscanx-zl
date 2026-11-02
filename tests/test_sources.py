@@ -67,7 +67,7 @@ def test_hackertarget_quota_message_is_not_a_result(monkeypatch):
     s = src.HackertargetSource()
     s.clear_error()
     assert s.fetch("example.com") == set()
-    assert s.last_error() == "rate limited"
+    assert s.last_error() == "daily limit reached"
 
 
 def test_certspotter_follows_pages(monkeypatch):
