@@ -274,25 +274,47 @@ class UrlscanSource(SubdomainSource):
 
 
 class C99Source(SubdomainSource):
+    """C99.nl subdomain finder via its official API (needs C99_API_KEY).
+
+    The free web form at subdomainfinder.c99.nl is deliberately protected
+    against automation and the operator asks scripted users to buy an API
+    key, so the tool only uses the API, and only when a key is set.
+    """
+
+    API = "https://api.c99.nl/subdomainfinder"
+
     def __init__(self, fast=False):
         super().__init__("C99", fast=fast)
 
+    @staticmethod
+    def api_key():
+        return os.environ.get('C99_API_KEY', '').strip()
+
     def fetch(self, domain):
         subdomains = set()
-        dates = [(datetime.datetime.now() - datetime.timedelta(days=i)).strftime('%Y-%m-%d')
-                for i in range(7)]
-
-        for date in dates:
-            url = f"https://subdomainfinder.c99.nl/scans/{date}/{domain}"
-            response = self.get(url)
-            if response:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                for link in soup.select('td a.link.sd'):
-                    text = link.get_text(strip=True)
-                    if text.endswith(f".{domain}"):
-                        subdomains.add(text)
-                if subdomains:
-                    break
+        key = self.api_key()
+        if not key:
+            self._set_error('needs API key')
+            return subdomains
+        response = self.get(f"{self.API}?key={key}&domain={domain}&json",
+                            timeout=(5, 60), retries=1)
+        if not response:
+            return subdomains
+        try:
+            data = response.json()
+        except ValueError:
+            self._tls.last_error = 'source error'
+            return subdomains
+        if isinstance(data, dict) and data.get('success') is False:
+            msg = str(data.get('error') or '').lower()
+            self._tls.last_error = ('needs API key' if 'key' in msg
+                                    else 'source error')
+            return subdomains
+        items = data.get('subdomains', []) if isinstance(data, dict) else data
+        for item in items or []:
+            name = item.get('subdomain') if isinstance(item, dict) else item
+            if isinstance(name, str):
+                subdomains.add(name)
         return subdomains
 
 
@@ -317,8 +339,9 @@ def get_sources(mode="thorough"):
     # ("Anonymous access ... Please authenticate") - only use it with a key
     if os.environ.get('OTX_API_KEY', '').strip():
         sources.append(AlienVaultSource(fast))
+    if C99Source.api_key():
+        sources.append(C99Source(fast))
     if not fast:
         sources.append(WaybackSource())
-    # Not used: AnubisDbSource (jldc.me now redirects to a 403 page,
-    # Nov 2026) and C99Source (HTML scraping of daily scans, rarely useful).
+    # Not used: AnubisDbSource (jldc.me now redirects to a 403 page, Nov 2026)
     return sources

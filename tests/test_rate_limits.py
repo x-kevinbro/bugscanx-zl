@@ -173,3 +173,32 @@ def test_trickling_response_is_cut_off(monkeypatch):
     assert h.get("https://x", timeout=(0.1, 0.2)) is None
     assert h.last_error() == "timeout"
     assert time.monotonic() - start < 2
+
+
+def test_c99_only_with_key_and_parses_api(monkeypatch):
+    monkeypatch.delenv("C99_API_KEY", raising=False)
+    assert "C99" not in {s.name for s in src.get_sources()}
+    monkeypatch.setenv("C99_API_KEY", "k")
+    assert "C99" in {s.name for s in src.get_sources()}
+    seen = []
+
+    def fake_get(self, url, **kw):
+        seen.append(url)
+        return Resp(200, json_data={"success": True, "subdomains": [
+            {"subdomain": "a.example.com", "ip": "1.1.1.1"}, {"subdomain": "b.example.com"}]})
+
+    monkeypatch.setattr(u.RequestHandler, "get", fake_get)
+    s = src.C99Source()
+    s.clear_error()
+    assert s.fetch("example.com") == {"a.example.com", "b.example.com"}
+    assert "key=k" in seen[0] and "domain=example.com" in seen[0]
+
+
+def test_c99_bad_key(monkeypatch):
+    monkeypatch.setenv("C99_API_KEY", "bad")
+    monkeypatch.setattr(u.RequestHandler, "get", lambda self, url, **kw: Resp(
+        200, json_data={"success": False, "error": "Invalid API key"}))
+    s = src.C99Source()
+    s.clear_error()
+    assert s.fetch("example.com") == set()
+    assert s.last_error() == "needs API key"

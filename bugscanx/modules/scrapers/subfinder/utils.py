@@ -151,6 +151,7 @@ SOURCE_LIMITS = {
     'CertSpotter': (1, 1.0),
     'urlscan': (2, 2.1),       # 30 searches / minute per IP without a key
     'Wayback': (2, 1.0),
+    'C99': (2, 1.0),
 }
 _limiters = {}
 _limiters_lock = threading.Lock()
