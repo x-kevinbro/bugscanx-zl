@@ -6,7 +6,7 @@
 </div>
 
 <p align="center">
-    <img src="https://img.shields.io/badge/version-1.4.0-8ccf7e?labelColor=1e2528&style=for-the-badge"/>
+    <img src="https://img.shields.io/badge/version-1.5.0-8ccf7e?labelColor=1e2528&style=for-the-badge"/>
     <img src="https://img.shields.io/badge/python-3.9%2B-67b0e8?labelColor=1e2528&style=for-the-badge"/>
     <img src="https://img.shields.io/badge/license-MIT-f39c12?labelColor=1e2528&style=for-the-badge"/>
 </p>
@@ -40,6 +40,29 @@
 ### 🌐 IP Lookup, 🚪 Port Scanner, 🔎 DNS & Host Info, 📁 File Toolkit
 
 Reverse-IP lookup and CIDR processing, a port scanner (common ports or all 1–65535), DNS records, host/CDN/TLS details, and file split/merge/dedupe tools.
+
+### 🧰 ZL Scanner (menu 10)
+
+Nine focused scanners in one sub-menu. Pick an option, enter the IP / CIDR /
+proxy or the path to your `file.txt`, and read the results on screen (they are
+saved to a file too).
+
+| # | Scanner | Input | Output |
+|---|---------|-------|--------|
+| 1 | IP scanner | single IP / CIDR (eg `104.18.0.0/16`) or a file with many CIDRs | IPs answering HTTP(S) |
+| 2 | Reverse IP | an IP address (or file of IPs) | hostnames linked to that IP (RapidDNS, HackerTarget, YouGetSignal, PTR) |
+| 3 | Subdomain scanner | file with domains | subdomains |
+| 4 | Normal domain scanner | file with domains | status / server per domain |
+| 5 | Proxy scanner | file with proxies, eg `172.22.2.38:80` (use your own ISP proxy) | which proxies work (HTTP GET and/or CONNECT tunnel) |
+| 6 | Unlimited scanner | `hostname : ip` file (from option 8) | scan results - for ISPs that freeze while scanning |
+| 7 | Normal domain scanner (alt) | file with domains | same goal as 4, raw-socket method |
+| 8 | Hostname : IP creator | file with domains | ready-to-use `hostname : ip` file for option 6 |
+| 9 | TLS scanner | hosts found by the scanner | TLS/SNI handshake result on port 443 - no extra setup |
+
+**Unlimited scanner (6)** connects straight to the IP from the `hostname : ip`
+list (no DNS while scanning), uses low concurrency and hard timeouts, and has a
+**freeze guard**: when many probes fail in a row it pauses, waits until the
+network answers again, then re-tests every probe that failed during the freeze.
 
 ## ⚡ Installation
 

@@ -28,7 +28,7 @@ class IPLookup:
         self.console.print_ip_start(ip)
         self.console.print_progress(self.completed, total)
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=len(scrapers) or 1) as executor:
             futures = [
                 executor.submit(self._fetch_from_source, source, ip)
                 for source in scrapers

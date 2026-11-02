@@ -2,6 +2,37 @@
 
 Community continuation of the discontinued bugscanx host checker.
 
+## 1.5.0 - ZL Scanner suite (menu 10)
+
+New main-menu entry **[10] ZL SCANNER** with nine scanners:
+
+1. **IP scanner** - one prompt takes an IP, CIDR (`104.18.0.0/16`), a
+   comma list, or a `file.txt` of CIDRs; shows the IP count before scanning.
+2. **Reverse IP** - IP -> hostnames. Two new sources: HackerTarget reverse
+   IP API and local PTR lookup (works when the web sources are down).
+   Fixed a hang: the YouGetSignal request had no timeout.
+3. **Subdomain scanner** - file of domains -> subdomains (deduplicated by main
+   domain, Thorough/Fast source mode).
+4. **Normal domain scanner** - file of domains -> code / server / IP per domain.
+5. **Proxy scanner** - file of `ip:port` proxies; tests HTTP GET through the
+   proxy and/or a CONNECT tunnel (what SSH apps use) and lists the working
+   ones with response time. Accepts `http://`, `user:pass@` and IPv6 forms.
+6. **Unlimited scanner** - for ISPs that freeze while scanning: uses
+   `hostname : ip` input (no DNS during the scan), low concurrency, optional
+   per-request delay, and a freeze guard that pauses, waits for the network to
+   return and re-tests everything that failed during the freeze. A run of dead
+   hosts on a working network is detected as a false alarm and does not pause.
+7. **Normal domain scanner (alt method)** - same goal as 4 using raw sockets
+   (no requests pool, no body download, hard timeouts).
+8. **Hostname : IP creator** - resolves a domain list into a
+   `hostname : ip` file for option 6 (first IP or all IPs, duplicates removed).
+9. **TLS scanner** - TLS/SNI handshake on 443; accepts plain hosts or
+   `hostname : ip` lines (handshake goes straight to that IP with the host as SNI).
+
+All of them use the shared engine: live progress, one Ctrl+C stops, failure
+summary, Append/Overwrite/Cancel for existing output files. 32 new tests
+(local HTTP server + fake proxy + simulated network freeze).
+
 ## 1.4.0 - accuracy, coverage and speed
 
 Package renamed to **`bugscanx-zl`** (was `bugscan-x`) so updates can no

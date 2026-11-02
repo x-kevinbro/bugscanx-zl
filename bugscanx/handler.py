@@ -41,3 +41,8 @@ def run_8():
 def run_9():
     from bugscanx.modules.others import update
     update.main()
+
+
+def run_10():
+    from bugscanx.modules.zl import menu
+    menu.main()
